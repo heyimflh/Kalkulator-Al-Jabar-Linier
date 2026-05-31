@@ -1,21 +1,21 @@
 # =============================================================================
-# MAIN.PY — Entry Point Aplikasi
+# MAIN.PY — Entry Point
 # =============================================================================
-# Linear Algebra Dashboard Pro
-# Kalkulator Aljabar Linear Modern dengan CustomTkinter
+# AXIOM — Linear Algebra Workspace
+# Premium desktop calculator for linear algebra computation.
 # =============================================================================
 
 import sys
 import os
 
-# Pastikan directory project ada di path
+# Ensure project directory is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app import ModernAlinApp
 
 
 def main():
-    """Launch the application."""
+    """Launch AXIOM application."""
     app = ModernAlinApp()
     app.mainloop()
 

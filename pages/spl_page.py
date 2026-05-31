@@ -1,5 +1,13 @@
 # =============================================================================
 # SPL_PAGE.PY — Halaman Sistem Persamaan Linear (dengan Step Engine)
+# -----------------------------------------------------------------------------
+# UI/UX: "Scientific Laboratory" — elevated card system, dual-theme.
+#   • Light Mode  : "Amethyst Haze"  (crisp slate-white + royal lavender)
+#   • Dark Mode   : "Cosmic Night"   (deep space + neon lavender)
+#
+# CATATAN PENTING: Hanya struktur layout, frame, dan parameter tema yang
+# diubah. Seluruh logika matematika, solver (Gauss, Gauss-Jordan, Matriks
+# Balikan), dan data binding tetap 100% utuh & fungsional.
 # =============================================================================
 
 import customtkinter as ctk
@@ -16,6 +24,25 @@ from logic.step_engine import (
 from utils.formatter import format_matriks_simple
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DUAL-THEME COLOR TOKENS — tuple format (light_color, dark_color)
+#   Light : "Amethyst Haze"   |   Dark : "Cosmic Night"
+# ─────────────────────────────────────────────────────────────────────────────
+COLOR_APP_BG         = ("#F8FAFC", "#0B0B14")   # Crisp slate-white / deep space
+COLOR_MAIN_CARD      = ("#F1F5F9", "#141423")   # Top & bottom panels
+COLOR_WORKSPACE_CARD = ("#FFFFFF", "#1E1E2F")   # Bright workspace / cosmic gray
+COLOR_SUB_CARD       = ("#F3E8FF", "#252538")   # Isolated lavender / dark pocket
+COLOR_BORDER         = ("#E9D5FF", "#2E2E44")   # Card framing border
+COLOR_TEXT_MAIN      = ("#1E3A8A", "#FFFFFF")   # Deep indigo / white
+COLOR_TEXT_MUTED     = ("#6B21A8", "#94A3B8")   # Royal purple / slate
+COLOR_INPUT_BG       = ("#FFFFFF", "#1A1A26")
+COLOR_INPUT_BORDER   = ("#D8B4FE", "#3F3F5C")
+COLOR_BUTTON_SUBTLE  = ("#F3E8FF", "#2E2E44")
+COLOR_BUTTON_TEXT    = ("#6B21A8", "#A78BFA")
+COLOR_ACCENT_CEMENT  = ("#7C3AED", "#A78BFA")   # Big action button glow
+COLOR_ACCENT_HOVER   = ("#6D28D9", "#C084FC")
+
+
 class SPLPage(ctk.CTkFrame):
     """
     Halaman SPL dengan step-by-step engine.
@@ -23,28 +50,122 @@ class SPLPage(ctk.CTkFrame):
     """
 
     def __init__(self, master, **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
+        # A. Page base — workspace canvas
+        super().__init__(master, fg_color=COLOR_APP_BG, **kwargs)
+        self._last_mode = ctk.get_appearance_mode()
         self._build_layout()
+        # Self-contained watcher → restyle raw tk.Text console on theme toggle.
+        self._watch_theme()
 
+    # ─────────────────────────────────────────────
+    # STYLE PRESETS (diteruskan ke komponen bersama)
+    # ─────────────────────────────────────────────
+    def _matrix_style(self, toolbar_cols=3):
+        """Style token untuk MatrixInputWidget (cells, selectors, toolbar).
+
+        `toolbar_cols` memungkinkan Matriks A (3 kolom) & Vektor b (2 kolom)
+        punya tata-letak toolbar yang rapi sesuai lebar masing-masing kartu.
+        """
+        return {
+            "label_color": COLOR_TEXT_MAIN,
+            "muted_color": COLOR_TEXT_MUTED,
+            # C. Matrix entry cells — perfectly square, crisp framing
+            "cell_fg": COLOR_INPUT_BG,
+            "cell_text": COLOR_TEXT_MAIN,
+            "cell_border": COLOR_INPUT_BORDER,
+            "cell_border_focus": COLOR_ACCENT_CEMENT,
+            "cell_radius": 6,
+            "cell_width": 46,
+            "cell_height": 46,
+            # Sel + font menyusut otomatis agar muat di lebar kartu
+            # (anti-clipping horizontal pd orde besar 10×10), tetap persegi.
+            "adaptive_cells": True,
+            "cell_min": 30,   # cukup utk "-9"/"10" tanpa terpotong
+            # Dimension selectors (Baris/Kolom) — stacked so they never clip
+            "selector_fg": COLOR_INPUT_BG,
+            "selector_button": COLOR_ACCENT_CEMENT,
+            "selector_button_hover": COLOR_ACCENT_HOVER,
+            "selector_text": COLOR_TEXT_MAIN,
+            "selector_width": 58,
+            "header_stack": True,
+            # Grid tumbuh dinamis: tanpa kotak scroll internal → tidak ada
+            # konflik nested-scroll & tidak ada clipping utk orde besar (10×10).
+            "grid_scroll": False,
+            # C. Utility toolbar — modern outlined chip buttons, responsive grid
+            "util_fg": COLOR_BUTTON_SUBTLE,
+            "util_hover": COLOR_BORDER,
+            "util_text": COLOR_BUTTON_TEXT,
+            "util_border": COLOR_BUTTON_TEXT,   # visible outline (both themes)
+            "util_border_width": 1,
+            "toolbar_wrap": True,
+            "toolbar_cols": toolbar_cols,
+        }
+
+    def _method_style(self):
+        """Style token untuk MethodSelector (segmented button).
+
+        CTkSegmentedButton hanya punya SATU text_color per tema, sehingga
+        warna chip dipilih agar SATU warna teks terbaca baik di chip terpilih
+        maupun tak-terpilih:
+          • Light: teks ungu tua di atas chip lavender muda (aktif sedikit
+            lebih pekat) → selalu kontras.
+          • Dark : teks putih di atas chip gelap (aktif violet jenuh) → kontras.
+        """
+        return {
+            "label_color": COLOR_TEXT_MAIN,
+            "muted_color": COLOR_TEXT_MUTED,
+            "seg_fg": COLOR_SUB_CARD,                          # gap / track
+            "seg_selected": ("#C4B5FD", "#7C3AED"),            # chip aktif
+            "seg_selected_hover": ("#DDD6FE", "#8B5CF6"),
+            "seg_unselected": ("#F3E8FF", "#252538"),          # chip idle
+            "seg_unselected_hover": ("#E9D5FF", "#2E2E44"),
+            "seg_text": ("#5B21B6", "#FFFFFF"),                # 1 warna / tema
+        }
+
+    # ─────────────────────────────────────────────
+    # LAYOUT — Elevated card system
+    # ─────────────────────────────────────────────
     def _build_layout(self):
-        # ─── Header ───
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=30, pady=(25, 10))
-        ctk.CTkLabel(header, text="⊞  Sistem Persamaan Linear (SPL)", font=FONT_HEADING, anchor="w").pack(side="left")
-
-        ctk.CTkFrame(self, height=1, fg_color=("gray75", "gray30")).pack(fill="x", padx=30, pady=(0, 15))
-
-        # ─── Scrollable Content ───
+        # Scroll surface keeps the app background visible behind the cards.
         content = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        content.pack(fill="both", expand=True, padx=30, pady=(0, 15))
+        content.pack(fill="both", expand=True, padx=26, pady=22)
+        self._scroll_frame = content   # disimpan utk auto-scroll ke hasil
 
-        # Error Banner
+        # Inline error banner (di atas semua card)
         self.error_banner = ErrorBanner(content)
-        self.error_banner.pack(fill="x", pady=(0, 5))
+        self.error_banner.pack(fill="x", pady=(0, 6))
 
-        # Method Selector
-        self.method_selector = MethodSelector(
+        # ════════════════════════════════════════════════════════════════
+        # PANEL 1 — METHOD SELECTION CARD
+        # ════════════════════════════════════════════════════════════════
+        method_card = ctk.CTkFrame(
             content,
+            fg_color=COLOR_MAIN_CARD,
+            border_width=1,
+            border_color=COLOR_BORDER,
+            corner_radius=16,
+        )
+        method_card.pack(fill="x", pady=(0, 18))
+
+        ctk.CTkLabel(
+            method_card,
+            text="⊞   Sistem Persamaan Linear",
+            font=FONT_HEADING,
+            text_color=COLOR_TEXT_MAIN,
+            anchor="w",
+        ).pack(fill="x", padx=24, pady=(20, 2))
+
+        ctk.CTkLabel(
+            method_card,
+            text="Selesaikan Ax = b langkah demi langkah. Pilih metode eliminasi, "
+                 "isi matriks, lalu jalankan.",
+            font=FONT_SMALL,
+            text_color=COLOR_TEXT_MUTED,
+            anchor="w",
+        ).pack(fill="x", padx=24, pady=(0, 14))
+
+        self.method_selector = MethodSelector(
+            method_card,
             options=["Gauss", "Gauss-Jordan", "Matriks Balikan"],
             default="Gauss",
             tooltips={
@@ -52,35 +173,148 @@ class SPLPage(ctk.CTkFrame):
                 "Gauss-Jordan": "Eliminasi ke bentuk RREF (solusi langsung terbaca)",
                 "Matriks Balikan": "Solusi via x = A⁻¹·b (hanya matriks persegi non-singular)",
             },
+            style=self._method_style(),
         )
-        self.method_selector.pack(fill="x", pady=(0, 15))
+        self.method_selector.pack(fill="x", padx=24, pady=(0, 20))
 
-        # ─── Matrix Inputs (A dan b) ───
-        matrix_frame = ctk.CTkFrame(content, fg_color="transparent")
-        matrix_frame.pack(fill="x", pady=(0, 15))
-        matrix_frame.grid_columnconfigure(0, weight=3)
-        matrix_frame.grid_columnconfigure(1, weight=1)
+        # ════════════════════════════════════════════════════════════════
+        # PANEL 2 — SPLIT MATRIX WORKSPACE
+        # ════════════════════════════════════════════════════════════════
+        workspace_card = ctk.CTkFrame(
+            content,
+            fg_color=COLOR_WORKSPACE_CARD,
+            border_width=1,
+            border_color=COLOR_BORDER,
+            corner_radius=16,
+        )
+        workspace_card.pack(fill="x", pady=(0, 18))
 
-        self.matrix_a = MatrixInputWidget(matrix_frame, default_rows=3, default_cols=3, label="Matriks A (Koefisien)")
-        self.matrix_a.grid(row=0, column=0, sticky="nsew", padx=(0, 15))
+        ctk.CTkLabel(
+            workspace_card,
+            text="🧮   Workspace Matriks",
+            font=FONT_BODY,
+            text_color=COLOR_TEXT_MAIN,
+            anchor="w",
+        ).pack(fill="x", padx=22, pady=(18, 12))
 
-        self.matrix_b = MatrixInputWidget(matrix_frame, default_rows=3, default_cols=1, label="Vektor b (Konstanta)")
-        self.matrix_b.grid(row=0, column=1, sticky="nsew")
+        # Grid holder: dua sub-card terpisah (tanpa garis pemisah kaku).
+        # Bobot 7:3 + minsize → Vektor b selalu dapat porsi lebar yang sehat
+        # dan tak pernah terdesak keluar layar, di orde rendah maupun 10×10.
+        split = ctk.CTkFrame(workspace_card, fg_color="transparent")
+        split.pack(fill="both", expand=True, padx=22, pady=(0, 22))
+        split.grid_columnconfigure(0, weight=7, uniform="ws", minsize=320)
+        split.grid_columnconfigure(1, weight=3, uniform="ws", minsize=210)
+        split.grid_rowconfigure(0, weight=1)
 
-        # ─── Calculate Button ───
-        btn_frame = ctk.CTkFrame(content, fg_color="transparent")
-        btn_frame.pack(fill="x", pady=(0, 15))
+        # ── Left Sub-Card: Matriks A (Koefisien) + dropdown Baris/Kolom ──
+        sub_a = ctk.CTkFrame(
+            split,
+            fg_color=COLOR_SUB_CARD,
+            border_width=1,
+            border_color=COLOR_BORDER,
+            corner_radius=12,
+        )
+        sub_a.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+
+        self.matrix_a = MatrixInputWidget(
+            sub_a, default_rows=3, default_cols=3,
+            label="Matriks A (Koefisien)",
+            style=self._matrix_style(toolbar_cols=3),
+        )
+        self.matrix_a.pack(fill="both", expand=True, padx=16, pady=16)
+
+        # ── Right Sub-Card: Vektor b (Konstanta) ──
+        sub_b = ctk.CTkFrame(
+            split,
+            fg_color=COLOR_SUB_CARD,
+            border_width=1,
+            border_color=COLOR_BORDER,
+            corner_radius=12,
+        )
+        sub_b.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+
+        self.matrix_b = MatrixInputWidget(
+            sub_b, default_rows=3, default_cols=1,
+            label="Vektor b (Konstanta)",
+            style=self._matrix_style(toolbar_cols=2),  # toolbar rapi 2 kolom
+        )
+        self.matrix_b.pack(fill="both", expand=True, padx=16, pady=16)
+
+        # ════════════════════════════════════════════════════════════════
+        # PANEL 3 — ACTION (wide, centered)
+        # ════════════════════════════════════════════════════════════════
+        action_bar = ctk.CTkFrame(content, fg_color="transparent")
+        action_bar.pack(fill="x", pady=(0, 18))
+
         self.calc_button = ctk.CTkButton(
-            btn_frame, text="⚡ Hitung SPL", font=FONT_BUTTON,
-            height=40, corner_radius=8, command=self._on_calculate
+            action_bar, text="⚡   Hitung SPL", font=FONT_BUTTON,
+            width=420, height=50, corner_radius=12,
+            fg_color=COLOR_ACCENT_CEMENT, hover_color=COLOR_ACCENT_HOVER,
+            command=self._on_calculate,
         )
-        self.calc_button.pack(side="left")
-        ctk.CTkLabel(btn_frame, text="Ctrl+Enter", font=("Segoe UI", 10),
-                     text_color=("gray50", "gray60")).pack(side="left", padx=(10, 0))
+        self.calc_button.pack(anchor="center", pady=(0, 4))
 
-        # ─── Result Console ───
-        self.result_console = ResultConsoleWidget(content)
-        self.result_console.pack(fill="both", expand=True, pady=(0, 10))
+        ctk.CTkLabel(
+            action_bar, text="Pintasan: Ctrl+Enter", font=("Segoe UI", 10),
+            text_color=COLOR_TEXT_MUTED,
+        ).pack(anchor="center")
+
+        # ════════════════════════════════════════════════════════════════
+        # PANEL 4 — PREMIUM OUTPUT TERMINAL
+        # ════════════════════════════════════════════════════════════════
+        result_card = ctk.CTkFrame(
+            content,
+            fg_color=COLOR_MAIN_CARD,
+            border_width=1,
+            border_color=COLOR_BORDER,
+            corner_radius=16,
+        )
+        result_card.pack(fill="both", expand=True, pady=(0, 4))
+        self._result_card = result_card   # target auto-scroll
+
+        self.result_console = ResultConsoleWidget(result_card, fg_color="transparent")
+        self.result_console.pack(fill="both", expand=True, padx=25, pady=25)
+
+    # ─────────────────────────────────────────────
+    # AUTO-SCROLL KE HASIL (UX: user tak perlu scroll manual)
+    # ─────────────────────────────────────────────
+    def _scroll_to_results(self):
+        """Geser scrollable frame agar kartu hasil terlihat penuh."""
+        try:
+            canvas = self._scroll_frame._parent_canvas
+            self.update_idletasks()
+            # Posisi-y kartu hasil relatif terhadap tinggi total konten.
+            card_y = self._result_card.winfo_y()
+            total = canvas.bbox("all")
+            if not total:
+                return
+            total_h = total[3] - total[1]
+            if total_h <= 0:
+                return
+            frac = max(0.0, min(1.0, card_y / total_h))
+            canvas.yview_moveto(frac)
+        except Exception:
+            pass  # canvas belum siap / widget destroyed
+
+    # ─────────────────────────────────────────────
+    # THEME WATCHER (self-contained, tidak menyentuh app.py)
+    # ─────────────────────────────────────────────
+    def _watch_theme(self):
+        """Pantau perubahan appearance mode → restyle console tk.Text."""
+        try:
+            mode = ctk.get_appearance_mode()
+            if mode != self._last_mode:
+                self._last_mode = mode
+                self.result_console.update_theme()
+        except Exception:
+            return  # widget sudah destroyed
+        # Re-schedule selama widget masih hidup.
+        if self.winfo_exists():
+            self.after(400, self._watch_theme)
+
+    # =========================================================================
+    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & solver utuh)  ░░
+    # =========================================================================
 
     def _on_calculate(self):
         """Handle perhitungan SPL."""
@@ -114,6 +348,9 @@ class SPLPage(ctk.CTkFrame):
         except Exception as e:
             self.result_console.insert_error(str(e))
             self.error_banner.show_error(f"Perhitungan gagal: {e}")
+
+        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        self.after(60, self._scroll_to_results)
 
     def _solve_gauss(self, A, b):
         """Eliminasi Gauss dengan step-by-step engine."""

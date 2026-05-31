@@ -22,12 +22,13 @@ class MethodSelector(ctk.CTkFrame):
     """
 
     def __init__(self, master, label="Metode:", options=None,
-                 default=None, tooltips=None, on_change=None, **kwargs):
+                 default=None, tooltips=None, on_change=None, style=None, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
 
         self.options = options or ["Option 1", "Option 2"]
         self.tooltips = tooltips or {}
         self.on_change = on_change
+        self.style = style or {}
         self._selected = ctk.StringVar(value=default or self.options[0])
 
         self._build_ui()
@@ -35,10 +36,31 @@ class MethodSelector(ctk.CTkFrame):
     def _build_ui(self):
         """Bangun label dan segmented button."""
 
+        s = self.style
+
+        label_kwargs = {}
+        if s.get("label_color"):
+            label_kwargs["text_color"] = s["label_color"]
+
         # Label
         ctk.CTkLabel(
-            self, text="Metode:", font=FONT_BODY
+            self, text="Metode:", font=FONT_BODY, **label_kwargs
         ).pack(anchor="w", pady=(0, 8))
+
+        # Optional segmented-button styling (only pass provided keys).
+        seg_kwargs = {}
+        if s.get("seg_fg"):
+            seg_kwargs["fg_color"] = s["seg_fg"]
+        if s.get("seg_selected"):
+            seg_kwargs["selected_color"] = s["seg_selected"]
+        if s.get("seg_selected_hover"):
+            seg_kwargs["selected_hover_color"] = s["seg_selected_hover"]
+        if s.get("seg_unselected"):
+            seg_kwargs["unselected_color"] = s["seg_unselected"]
+        if s.get("seg_unselected_hover"):
+            seg_kwargs["unselected_hover_color"] = s["seg_unselected_hover"]
+        if s.get("seg_text"):
+            seg_kwargs["text_color"] = s["seg_text"]
 
         # Segmented Button
         self.seg_button = ctk.CTkSegmentedButton(
@@ -49,16 +71,18 @@ class MethodSelector(ctk.CTkFrame):
             height=36,
             corner_radius=8,
             command=self._on_select,
+            **seg_kwargs,
         )
         self.seg_button.pack(fill="x")
 
         # Tooltip/description label (shows description of selected method)
+        desc_kwargs = {"text_color": s.get("muted_color", ("gray50", "gray60"))}
         self.desc_label = ctk.CTkLabel(
             self,
             text=self._get_tooltip(self._selected.get()),
             font=FONT_SMALL,
-            text_color=("gray50", "gray60"),
             anchor="w",
+            **desc_kwargs,
         )
         self.desc_label.pack(anchor="w", pady=(5, 0))
 

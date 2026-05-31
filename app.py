@@ -1,11 +1,15 @@
 # =============================================================================
-# APP.PY — Main Application Window (Fase 5: Polish & UX)
+# APP.PY — AXIOM Main Application Window
+# =============================================================================
+# AXIOM — Linear Algebra Workspace
+# Premium desktop application for linear algebra computation.
 # =============================================================================
 
 import customtkinter as ctk
 from config import (
     WINDOW_DEFAULT, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
-    FONT_HEADING, FONT_BODY, FONT_SMALL, MENU_ITEMS, SIDEBAR_WIDTH
+    FONT_HEADING, FONT_BODY, FONT_SMALL, MENU_ITEMS, SIDEBAR_WIDTH,
+    APP_NAME, APP_SUBTITLE,
 )
 from components.sidebar import SidebarFrame
 from components.status_bar import StatusBar
@@ -14,6 +18,7 @@ from pages import (
     SPLPage, DeterminanPage, InversPage,
     LUPage, EigenPage, DiagonalPage, SVDPage
 )
+from pages.dashboard_page import DashboardPage
 
 
 # Set default appearance
@@ -37,15 +42,15 @@ PAGE_NAMES = {item["id"]: item["label"] for item in MENU_ITEMS}
 
 class ModernAlinApp(ctk.CTk):
     """
-    Main application — Single-Window Dashboard.
-    Fase 5: Responsive sidebar, status bar, enhanced shortcuts, polish.
+    AXIOM — Linear Algebra Workspace
+    Main application window with premium dashboard and feature pages.
     """
 
     def __init__(self):
         super().__init__()
 
         # ─── Window Config ───
-        self.title("Linear Algebra Dashboard Pro")
+        self.title(f"{APP_NAME} — {APP_SUBTITLE}")
         self.geometry(WINDOW_DEFAULT)
         self.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
 
@@ -66,7 +71,8 @@ class ModernAlinApp(ctk.CTk):
         self._build_content_area()
         self._build_status_bar()
         self._build_pages()
-        self._show_welcome()
+        self._build_dashboard()
+        self._show_dashboard()
         self._setup_shortcuts()
         self._setup_responsive()
 
@@ -75,7 +81,7 @@ class ModernAlinApp(ctk.CTk):
     # ─────────────────────────────────────────────
 
     def _build_sidebar(self):
-        """Buat sidebar navigation."""
+        """Build sidebar navigation."""
         self.sidebar = SidebarFrame(
             self,
             on_menu_click=self._on_menu_click,
@@ -84,19 +90,23 @@ class ModernAlinApp(ctk.CTk):
         self.sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew")
 
     def _build_content_area(self):
-        """Buat container content area."""
-        self.content_container = ctk.CTkFrame(self, corner_radius=15)
-        self.content_container.grid(row=0, column=1, padx=(0, 15), pady=(15, 5), sticky="nsew")
+        """Build content container."""
+        self.content_container = ctk.CTkFrame(
+            self,
+            corner_radius=0,
+            fg_color=("gray97", "#030303"),
+        )
+        self.content_container.grid(row=0, column=1, padx=0, pady=0, sticky="nsew")
         self.content_container.grid_columnconfigure(0, weight=1)
         self.content_container.grid_rowconfigure(0, weight=1)
 
     def _build_status_bar(self):
-        """Buat status bar di bawah."""
+        """Build status bar at the bottom."""
         self.status_bar = StatusBar(self)
-        self.status_bar.grid(row=1, column=1, padx=(0, 15), pady=(0, 5), sticky="ew")
+        self.status_bar.grid(row=1, column=1, padx=0, pady=0, sticky="ew")
 
     def _build_pages(self):
-        """Buat semua page frames."""
+        """Build all feature page frames."""
         for item in MENU_ITEMS:
             page_id = item["id"]
             if page_id in PAGE_CLASSES:
@@ -105,8 +115,15 @@ class ModernAlinApp(ctk.CTk):
                 page = self._create_placeholder_page(page_id, item["label"], item["icon"])
             self.pages[page_id] = page
 
+    def _build_dashboard(self):
+        """Build the premium AXIOM dashboard page."""
+        self.dashboard = DashboardPage(
+            self.content_container,
+            on_navigate=self._dashboard_navigate,
+        )
+
     def _create_placeholder_page(self, page_id, label, icon):
-        """Fallback placeholder."""
+        """Fallback placeholder for missing pages."""
         frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.pack(fill="x", padx=30, pady=(25, 15))
@@ -117,60 +134,28 @@ class ModernAlinApp(ctk.CTk):
         return frame
 
     # ─────────────────────────────────────────────
-    # WELCOME PAGE
+    # DASHBOARD
     # ─────────────────────────────────────────────
 
-    def _show_welcome(self):
-        """Tampilkan welcome/dashboard page."""
-        self.welcome_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        self.welcome_frame.grid(row=0, column=0, sticky="nsew")
+    def _show_dashboard(self):
+        """Show the AXIOM dashboard."""
+        self.dashboard.grid(row=0, column=0, sticky="nsew")
+        self.status_bar.set_page("Dashboard")
 
-        # Center content
-        center = ctk.CTkFrame(self.welcome_frame, fg_color="transparent")
-        center.place(relx=0.5, rely=0.38, anchor="center")
-
-        ctk.CTkLabel(center, text="⊞", font=("Segoe UI", 64)).pack()
-        ctk.CTkLabel(center, text="Linear Algebra Dashboard",
-                     font=("Segoe UI", 28, "bold")).pack(pady=(10, 5))
-        ctk.CTkLabel(center, text="Pilih menu di sidebar untuk memulai perhitungan",
-                     font=FONT_BODY, text_color=("gray50", "gray60")).pack()
-
-        # Feature cards
-        cards = ctk.CTkFrame(self.welcome_frame, fg_color="transparent")
-        cards.place(relx=0.5, rely=0.65, anchor="center")
-
-        features = [
-            ("7 Fitur", "SPL, Det, Invers,\nLU, Eigen, Diag, SVD"),
-            ("Step-by-Step", "Lihat proses\nperhitungan detail"),
-            ("Dark / Light", "Tema yang nyaman\ndi mata"),
-        ]
-
-        for i, (title, desc) in enumerate(features):
-            card = ctk.CTkFrame(cards, corner_radius=12, width=180, height=100)
-            card.grid(row=0, column=i, padx=10, pady=10)
-            card.grid_propagate(False)
-            ctk.CTkLabel(card, text=title, font=("Segoe UI", 14, "bold")).pack(pady=(18, 3))
-            ctk.CTkLabel(card, text=desc, font=FONT_SMALL, text_color=("gray50", "gray60")).pack()
-
-        # Shortcut hints di bawah cards
-        hints = ctk.CTkFrame(self.welcome_frame, fg_color="transparent")
-        hints.place(relx=0.5, rely=0.88, anchor="center")
-        ctk.CTkLabel(
-            hints,
-            text="💡 Tips: Gunakan Ctrl+1~7 untuk navigasi cepat, Ctrl+Enter untuk hitung",
-            font=("Segoe UI", 11),
-            text_color=("gray50", "gray55"),
-        ).pack()
+    def _dashboard_navigate(self, page_id):
+        """Handle navigation from dashboard cards/buttons."""
+        self.sidebar.set_active(page_id)
+        self._on_menu_click(page_id)
 
     # ─────────────────────────────────────────────
     # NAVIGATION
     # ─────────────────────────────────────────────
 
     def _on_menu_click(self, menu_id):
-        """Switch halaman berdasarkan menu yang diklik."""
-        # Hide welcome
-        if hasattr(self, "welcome_frame") and self.welcome_frame.winfo_ismapped():
-            self.welcome_frame.grid_forget()
+        """Switch page based on menu click."""
+        # Hide dashboard
+        if self.dashboard.winfo_ismapped():
+            self.dashboard.grid_forget()
 
         # Hide current page
         if self.current_page and self.current_page.winfo_ismapped():
@@ -194,27 +179,27 @@ class ModernAlinApp(ctk.CTk):
         )
 
     # ─────────────────────────────────────────────
-    # KEYBOARD SHORTCUTS (Enhanced)
+    # KEYBOARD SHORTCUTS
     # ─────────────────────────────────────────────
 
     def _setup_shortcuts(self):
-        """Setup semua keyboard shortcuts."""
-        # Ctrl+1 s/d Ctrl+7: navigasi menu
+        """Setup all keyboard shortcuts."""
+        # Ctrl+1 to Ctrl+7: menu navigation
         for i, item in enumerate(MENU_ITEMS):
             self.bind(
                 f"<Control-Key-{i + 1}>",
                 lambda e, mid=item["id"]: self._shortcut_nav(mid)
             )
 
-        # Ctrl+L: Clear input pada halaman aktif
+        # Ctrl+L: Clear input on active page
         self.bind("<Control-l>", self._shortcut_clear)
         self.bind("<Control-L>", self._shortcut_clear)
 
-        # Ctrl+Shift+C: Copy hasil ke clipboard
+        # Ctrl+Shift+C: Copy result to clipboard
         self.bind("<Control-Shift-C>", self._shortcut_copy)
         self.bind("<Control-Shift-c>", self._shortcut_copy)
 
-        # Escape: kembali ke welcome
+        # Escape: back to dashboard
         self.bind("<Escape>", self._shortcut_home)
 
     def _shortcut_nav(self, menu_id):
@@ -223,11 +208,10 @@ class ModernAlinApp(ctk.CTk):
         self._on_menu_click(menu_id)
 
     def _shortcut_clear(self, event=None):
-        """Clear input pada halaman aktif."""
+        """Clear input on active page."""
         if self.current_page and hasattr(self.current_page, 'matrix_input'):
             self.current_page.matrix_input._clear_all()
             self.status_bar.set_status("Input cleared", "info")
-        # Juga clear untuk SPL page yang punya matrix_a
         if self.current_page and hasattr(self.current_page, 'matrix_a'):
             self.current_page.matrix_a._clear_all()
             if hasattr(self.current_page, 'matrix_b'):
@@ -235,7 +219,7 @@ class ModernAlinApp(ctk.CTk):
             self.status_bar.set_status("Input cleared", "info")
 
     def _shortcut_copy(self, event=None):
-        """Copy hasil dari result console."""
+        """Copy result from result console."""
         if self.current_page and hasattr(self.current_page, 'result_console'):
             content = self.current_page.result_console.get_content()
             if content:
@@ -244,64 +228,54 @@ class ModernAlinApp(ctk.CTk):
                 self.status_bar.set_status("✓ Hasil disalin ke clipboard", "success")
 
     def _shortcut_home(self, event=None):
-        """Kembali ke welcome page."""
+        """Return to dashboard."""
         if self.current_page and self.current_page.winfo_ismapped():
             self.current_page.grid_forget()
         self.current_page = None
         self.current_page_id = None
         self.sidebar.set_active(None)
 
-        if hasattr(self, "welcome_frame"):
-            self.welcome_frame.grid(row=0, column=0, sticky="nsew")
-        self.status_bar.set_page("Dashboard")
+        if not self.dashboard.winfo_ismapped():
+            self._show_dashboard()
 
     # ─────────────────────────────────────────────
     # RESPONSIVE SIDEBAR
     # ─────────────────────────────────────────────
 
     def _setup_responsive(self):
-        """Setup responsive behavior — sidebar collapse pada window kecil."""
+        """Setup responsive behavior — sidebar collapse on small window."""
         self.bind("<Configure>", self._on_resize)
         self._last_width = self.winfo_width()
 
     def _on_resize(self, event):
         """Handle window resize — collapse/expand sidebar."""
-        # Only respond to root window resize events
         if event.widget != self:
             return
 
         width = event.width
 
-        # Debounce: hanya proses jika perubahan signifikan
         if abs(width - self._last_width) < 50:
             return
         self._last_width = width
 
-        # Collapse sidebar jika window < 1000px
         if width < 1000 and not self._sidebar_collapsed:
             self._collapse_sidebar()
         elif width >= 1000 and self._sidebar_collapsed:
             self._expand_sidebar()
 
     def _collapse_sidebar(self):
-        """Collapse sidebar ke icon-only mode."""
+        """Collapse sidebar to icon-only mode."""
         self._sidebar_collapsed = True
         self.sidebar.configure(width=60)
-        # Hide text labels, show only icons
         for menu_id, btn in self.sidebar.buttons.items():
             item = next((i for i in MENU_ITEMS if i["id"] == menu_id), None)
             if item:
                 btn.configure(text=f" {item['icon']} ")
 
-        # Hide subtitle and theme label
-        if hasattr(self.sidebar, 'subtitle_label'):
-            pass  # Will be handled by sidebar internal state
-
     def _expand_sidebar(self):
-        """Expand sidebar ke full mode."""
+        """Expand sidebar to full mode."""
         self._sidebar_collapsed = False
         self.sidebar.configure(width=SIDEBAR_WIDTH)
-        # Restore full text
         for menu_id, btn in self.sidebar.buttons.items():
             item = next((i for i in MENU_ITEMS if i["id"] == menu_id), None)
             if item:

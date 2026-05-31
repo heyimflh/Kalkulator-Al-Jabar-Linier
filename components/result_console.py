@@ -20,6 +20,14 @@ class ResultConsoleWidget(ctk.CTkFrame):
         super().__init__(master, corner_radius=10, **kwargs)
 
         self.title_text = title
+
+        # Terminal display state (font scaling + wrap toggle).
+        self._font_family = FONT_CONSOLE[0]
+        self._font_size = FONT_CONSOLE[1]
+        self._min_font = 9
+        self._max_font = 16
+        self._wrap = "none"   # "none" → horizontal scroll for long expressions
+
         self._build_ui()
 
     def _build_ui(self):
@@ -36,11 +44,21 @@ class ResultConsoleWidget(ctk.CTkFrame):
             font=FONT_BODY,
         ).pack(side="left")
 
-        # Buttons (right side)
+        # Action buttons (right side)
         btn_style = {
             "font": FONT_SMALL,
             "height": 28,
             "width": 70,
+            "corner_radius": 6,
+            "fg_color": ("gray80", "#2C3E50"),
+            "hover_color": ("gray70", "#34495E"),
+            "text_color": ("gray20", "gray80"),
+        }
+        # Compact square style for terminal utility controls (-, +, wrap).
+        util_style = {
+            "font": FONT_SMALL,
+            "height": 28,
+            "width": 30,
             "corner_radius": 6,
             "fg_color": ("gray80", "#2C3E50"),
             "hover_color": ("gray70", "#34495E"),
@@ -57,33 +75,78 @@ class ResultConsoleWidget(ctk.CTkFrame):
 
         ctk.CTkButton(
             header, text="LaTeX", command=self._copy_latex, **btn_style
-        ).pack(side="right")
+        ).pack(side="right", padx=(5, 0))
+
+        # ─── Terminal utility cluster: font −/+ & wrap toggle ───
+        # Dipisahkan visual dari tombol aksi dengan sedikit jarak.
+        self.wrap_btn = ctk.CTkButton(
+            header, text="↩ Wrap", command=self._toggle_wrap, **{**util_style, "width": 64}
+        )
+        self.wrap_btn.pack(side="right", padx=(5, 12))
+
+        ctk.CTkButton(
+            header, text="A+", command=lambda: self._adjust_font(+1), **util_style
+        ).pack(side="right", padx=(5, 0))
+
+        ctk.CTkButton(
+            header, text="A−", command=lambda: self._adjust_font(-1), **util_style
+        ).pack(side="right", padx=(5, 0))
 
         # ─── Separator ───
         ctk.CTkFrame(self, height=1, fg_color=("gray75", "gray30")).pack(
             fill="x", padx=15, pady=(0, 5)
         )
 
-        # ─── Text Area (using tkinter Text for tag support) ───
+        # ─── Text Area (tkinter Text for tag support) ───
+        # Grid layout agar scrollbar vertikal & horizontal terintegrasi rapi
+        # tanpa saling menimpa, dan tombol aksi di header tetap bersih.
         text_frame = ctk.CTkFrame(self, fg_color="transparent")
         text_frame.pack(fill="both", expand=True, padx=15, pady=(0, 12))
+        text_frame.grid_rowconfigure(0, weight=1)
+        text_frame.grid_columnconfigure(0, weight=1)
 
         self.textbox = tk.Text(
             text_frame,
-            wrap="none",
-            font=FONT_CONSOLE,
+            wrap=self._wrap,
+            font=(self._font_family, self._font_size),
             relief="flat",
-            padx=10,
-            pady=10,
+            padx=20,
+            pady=20,
             state="disabled",
             cursor="arrow",
+            borderwidth=0,
+            highlightthickness=0,
         )
-        self.textbox.pack(fill="both", expand=True, side="left")
+        self.textbox.grid(row=0, column=0, sticky="nsew")
 
-        # Scrollbar
-        scrollbar_y = ctk.CTkScrollbar(text_frame, command=self.textbox.yview)
-        scrollbar_y.pack(fill="y", side="right")
-        self.textbox.configure(yscrollcommand=scrollbar_y.set)
+        # Vertical scrollbar
+        self.scrollbar_y = ctk.CTkScrollbar(text_frame, command=self.textbox.yview)
+        self.scrollbar_y.grid(row=0, column=1, sticky="ns")
+
+        # Horizontal scrollbar — untuk ekspresi panjang (CRootOf, polinom, dll.)
+        self.scrollbar_x = ctk.CTkScrollbar(
+            text_frame, orientation="horizontal", command=self.textbox.xview
+        )
+        self.scrollbar_x.grid(row=1, column=0, sticky="ew")
+
+        self.textbox.configure(
+            yscrollcommand=self.scrollbar_y.set,
+            xscrollcommand=self.scrollbar_x.set,
+        )
+        self._sync_hscroll_visibility()
+
+        # ─── Isolate mouse-wheel scrolling ───
+        # CTkScrollableFrame binds <MouseWheel> at the "all" bindtag level, so
+        # tanpa ini scroll di area hasil ikut menggeser seluruh halaman.
+        # Handler ini menggulir HANYA textbox lalu "break" agar event tidak
+        # naik ke page scroller.
+        self.textbox.bind("<MouseWheel>", self._on_mousewheel)       # Windows / macOS
+        self.textbox.bind("<Button-4>", self._on_mousewheel)         # Linux up
+        self.textbox.bind("<Button-5>", self._on_mousewheel)         # Linux down
+        # Shift+wheel → horizontal scroll (nyaman utk ekspresi panjang).
+        self.textbox.bind("<Shift-MouseWheel>", self._on_shift_mousewheel)
+        self.textbox.bind("<Shift-Button-4>", self._on_shift_mousewheel)
+        self.textbox.bind("<Shift-Button-5>", self._on_shift_mousewheel)
 
         # ─── Configure Tags (syntax highlighting) ───
         self._setup_tags()
@@ -92,28 +155,117 @@ class ResultConsoleWidget(ctk.CTkFrame):
         self._apply_theme()
 
     def _setup_tags(self):
-        """Setup text tags untuk syntax highlighting."""
-        self.textbox.tag_configure("step", foreground="#3498DB", font=(FONT_CONSOLE[0], FONT_CONSOLE[1], "bold"))
-        self.textbox.tag_configure("result", foreground="#2ECC71", font=(FONT_CONSOLE[0], FONT_CONSOLE[1], "bold"))
-        self.textbox.tag_configure("error", foreground="#E74C3C", font=(FONT_CONSOLE[0], FONT_CONSOLE[1], "bold"))
+        """Setup text tags untuk syntax highlighting (font mengikuti ukuran)."""
+        fam, fs = self._font_family, self._font_size
+        self.textbox.tag_configure("step", foreground="#3498DB", font=(fam, fs, "bold"))
+        self.textbox.tag_configure("result", foreground="#2ECC71", font=(fam, fs, "bold"))
+        self.textbox.tag_configure("error", foreground="#E74C3C", font=(fam, fs, "bold"))
         self.textbox.tag_configure("matrix", foreground="#ECF0F1")
         self.textbox.tag_configure("separator", foreground="#7F8C8D")
         self.textbox.tag_configure("info", foreground="#95A5A6")
 
     def _apply_theme(self):
-        """Apply warna berdasarkan current appearance mode."""
+        """Apply warna berdasarkan current appearance mode.
+
+        Penting: kedua cabang HARUS men-set ulang SEMUA tag. Sebelumnya
+        cabang Dark hanya set bg/fg, sehingga setelah toggle Light→Dark
+        warna tag (matrix/info/separator) tertinggal di nilai light-mode
+        (abu-abu gelap) dan tak terlihat di atas background gelap.
+
+        Terminal "lab report": bg ("#F8FAFC", "#151522"), teks high-contrast
+        ("#1E1B4B", "#E2E8F0"). Aksen hijau "result" dipertahankan bersih.
+        """
         mode = ctk.get_appearance_mode()
         if mode == "Dark":
-            self.textbox.configure(bg="#1A1A2E", fg="#ECF0F1", insertbackground="#ECF0F1")
+            # Cosmic Night — code-workspace dark fill, teks terang & jelas.
+            self.textbox.configure(bg="#151522", fg="#E2E8F0", insertbackground="#E2E8F0")
+            self.textbox.tag_configure("step", foreground="#A78BFA")       # lavender
+            self.textbox.tag_configure("result", foreground="#4ADE80")     # green accent
+            self.textbox.tag_configure("error", foreground="#FB7185")      # rose terang
+            self.textbox.tag_configure("matrix", foreground="#E2E8F0")     # near-white (angka jelas)
+            self.textbox.tag_configure("separator", foreground="#64748B")  # slate
+            self.textbox.tag_configure("info", foreground="#A5B4CF")       # muted terang
         else:
-            self.textbox.configure(bg="#FFFFFF", fg="#1F2937", insertbackground="#1F2937")
-            # Override tag colors for light mode
-            self.textbox.tag_configure("step", foreground="#2563EB")
-            self.textbox.tag_configure("result", foreground="#059669")
+            # Amethyst Haze — lab-report light fill, teks indigo gelap.
+            self.textbox.configure(bg="#F8FAFC", fg="#1E1B4B", insertbackground="#1E1B4B")
+            self.textbox.tag_configure("step", foreground="#7C3AED")       # violet
+            self.textbox.tag_configure("result", foreground="#059669")     # green accent
             self.textbox.tag_configure("error", foreground="#DC2626")
-            self.textbox.tag_configure("matrix", foreground="#1F2937")
+            self.textbox.tag_configure("matrix", foreground="#1E293B")     # deep slate (angka jelas)
             self.textbox.tag_configure("separator", foreground="#9CA3AF")
-            self.textbox.tag_configure("info", foreground="#6B7280")
+            self.textbox.tag_configure("info", foreground="#6B21A8")       # royal purple
+
+    # ─────────────────────────────────────────────
+    # SCROLL ISOLATION
+    # ─────────────────────────────────────────────
+
+    def _on_mousewheel(self, event):
+        """Gulir hanya textbox; cegah event naik ke page scroller.
+
+        Mengembalikan "break" agar binding <MouseWheel> milik
+        CTkScrollableFrame (level "all") tidak ikut tereksekusi.
+        """
+        # Tentukan arah & jumlah unit (lintas platform).
+        if getattr(event, "num", None) == 4:          # Linux scroll up
+            delta = -3
+        elif getattr(event, "num", None) == 5:        # Linux scroll down
+            delta = 3
+        else:                                          # Windows / macOS
+            delta = -1 * int(event.delta / 120) * 3
+            if delta == 0:
+                delta = -1 if event.delta > 0 else 1
+        self.textbox.yview_scroll(delta, "units")
+        return "break"
+
+    def _on_shift_mousewheel(self, event):
+        """Shift+wheel → scroll horizontal (untuk ekspresi panjang)."""
+        if getattr(event, "num", None) == 4:
+            delta = -3
+        elif getattr(event, "num", None) == 5:
+            delta = 3
+        else:
+            delta = -1 * int(event.delta / 120) * 3
+            if delta == 0:
+                delta = -1 if event.delta > 0 else 1
+        self.textbox.xview_scroll(delta, "units")
+        return "break"
+
+    # ─────────────────────────────────────────────
+    # TERMINAL CONTROLS — font scaling & wrap toggle
+    # ─────────────────────────────────────────────
+
+    def _adjust_font(self, delta):
+        """Perbesar/perkecil font textbox (clamp 9–16pt) + sinkron tag font."""
+        new_size = max(self._min_font, min(self._max_font, self._font_size + delta))
+        if new_size == self._font_size:
+            return
+        self._font_size = new_size
+        self.textbox.configure(font=(self._font_family, self._font_size))
+        # Tag step/result/error pakai bold → ikut diskalakan ulang.
+        self._setup_tags()
+        self._apply_theme()
+        self._sync_hscroll_visibility()
+
+    def _toggle_wrap(self):
+        """Toggle antara wrap='none' (scroll horizontal) & 'word' (lipat baris)."""
+        if self._wrap == "none":
+            self._wrap = "word"
+            self.wrap_btn.configure(text="↩ Wrap: On")
+        else:
+            self._wrap = "none"
+            self.wrap_btn.configure(text="↩ Wrap")
+        self.textbox.configure(wrap=self._wrap)
+        self._sync_hscroll_visibility()
+
+    def _sync_hscroll_visibility(self):
+        """Sembunyikan scrollbar horizontal saat wrap aktif (tak diperlukan)."""
+        try:
+            if self._wrap == "none":
+                self.scrollbar_x.grid()
+            else:
+                self.scrollbar_x.grid_remove()
+        except Exception:
+            pass
 
     # ─────────────────────────────────────────────
     # PUBLIC API
