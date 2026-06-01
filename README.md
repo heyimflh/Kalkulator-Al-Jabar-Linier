@@ -1568,8 +1568,5 @@ Project ini dibuat sebagai bentuk eksplorasi dan implementasi pembelajaran Aljab
 </p>
 
 </div>
-
-::contentReference[oaicite:2]{index=2}
-
 [1]: https://github.com/heyimflh/Kalkulator-Al-Jabar-Linier.git "GitHub - heyimflh/Kalkulator-Al-Jabar-Linier: Kalkulator Aljabar Linear Modern — GUI Dashboard dengan Step-by-Step · GitHub"
 [2]: https://raw.githubusercontent.com/heyimflh/Kalkulator-Al-Jabar-Linier/main/MANUAL_BOOK.md "raw.githubusercontent.com"
