@@ -315,7 +315,7 @@ class SPLPage(ctk.CTkFrame):
     # =========================================================================
     # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
     # Logika solver (Gauss, Gauss-Jordan, Matriks Balikan) tetap utuh; hanya
-    # arsitektur threading & step-recording (skip utk n>6) yang dioptimasi.
+    # arsitektur threading yang dioptimasi. SELURUH langkah selalu ditampilkan.
     # =========================================================================
 
     def _on_calculate(self):
@@ -386,8 +386,8 @@ class SPLPage(ctk.CTkFrame):
     def _solve_gauss(self, A, b, console):
         """Eliminasi Gauss dengan step-by-step engine."""
         aug = A.row_join(b)
-        # Matriks besar (n>6): skip step recording demi performa.
-        show_steps = (A.rows <= 6 and A.cols <= 6)
+        # Selalu rekam & tampilkan SELURUH langkah, berapa pun ukuran matriks.
+        show_steps = True
 
         console.insert("Metode: Eliminasi Gauss\n\n", "step")
         console.insert("Matriks Augmented [A|b]:\n", "info")
@@ -396,12 +396,6 @@ class SPLPage(ctk.CTkFrame):
 
         # Solve with step engine
         solution, steps = solve_spl_gauss(A, b, show_steps=show_steps)
-
-        if not show_steps:
-            console.insert(
-                "\n(SPL besar — langkah eliminasi disembunyikan demi performa. "
-                "Menampilkan solusi akhir.)\n", "info"
-            )
 
         # Display steps
         for i, step in enumerate(steps):
@@ -419,8 +413,8 @@ class SPLPage(ctk.CTkFrame):
     def _solve_gauss_jordan(self, A, b, console):
         """Eliminasi Gauss-Jordan dengan step-by-step engine."""
         aug = A.row_join(b)
-        # Matriks besar (n>6): skip step recording demi performa.
-        show_steps = (A.rows <= 6 and A.cols <= 6)
+        # Selalu rekam & tampilkan SELURUH langkah, berapa pun ukuran matriks.
+        show_steps = True
 
         console.insert("Metode: Eliminasi Gauss-Jordan\n\n", "step")
         console.insert("Matriks Augmented [A|b]:\n", "info")
@@ -429,12 +423,6 @@ class SPLPage(ctk.CTkFrame):
 
         # Solve with step engine
         solution, steps = solve_spl_gauss_jordan(A, b, show_steps=show_steps)
-
-        if not show_steps:
-            console.insert(
-                "\n(SPL besar — langkah eliminasi disembunyikan demi performa. "
-                "Menampilkan solusi akhir.)\n", "info"
-            )
 
         # Display steps
         for i, step in enumerate(steps):

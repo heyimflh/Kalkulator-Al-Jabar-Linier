@@ -283,7 +283,7 @@ class InversPage(ctk.CTkFrame):
     # =========================================================================
     # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
     # Logika metode (Adjugate, Gauss-Jordan, Built-in) tetap utuh; hanya
-    # arsitektur threading & step-recording (skip utk n>6) yang dioptimasi.
+    # arsitektur threading yang dioptimasi. SELURUH langkah selalu ditampilkan.
     # =========================================================================
 
     def _on_calculate(self):
@@ -399,8 +399,8 @@ class InversPage(ctk.CTkFrame):
         I = sp.eye(n)
         aug = M.row_join(I)
 
-        # Matriks besar (n>6): skip step recording demi performa & kepraktisan.
-        show_steps = (n <= 6)
+        # Selalu rekam & tampilkan SELURUH langkah, berapa pun ukuran matriks.
+        show_steps = True
 
         console.insert("Metode: Gauss-Jordan\n", "step")
         console.insert("Augmentasi [A | I]:\n\n", "info")
@@ -409,12 +409,6 @@ class InversPage(ctk.CTkFrame):
 
         # Use step engine
         inverse, steps = gauss_jordan_inverse(M, show_steps=show_steps)
-
-        if not show_steps:
-            console.insert(
-                f"\n(Matriks {n}×{n} besar — langkah eliminasi disembunyikan "
-                "demi performa. Menampilkan hasil akhir.)\n", "info"
-            )
 
         # Display steps
         for i, step in enumerate(steps):

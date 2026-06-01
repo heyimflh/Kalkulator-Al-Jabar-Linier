@@ -15,12 +15,32 @@ import customtkinter as ctk
 import sympy as sp
 from config import FONT_HEADING, FONT_BODY, FONT_BUTTON, FONT_SMALL
 from components.matrix_input import MatrixInputWidget
-from components.result_console import ResultConsoleWidget
+from components.result_console import ResultConsoleWidget, ConsoleBuffer
 from components.error_banner import ErrorBanner
 from utils.formatter import (
     format_matriks_simple, normalisasi,
     format_numeric_matrix, format_num, is_purely_numeric,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUEUE SINK — ConsoleBuffer yang mendorong tiap langkah ke queue thread-safe
+# alih-alih menumpuknya, sehingga langkah dapat dirender BERTAHAP (incremental)
+# oleh main thread (Tk tidak thread-safe). API tulis identik dgn induknya, jadi
+# logika perhitungan tidak perlu diubah.
+# ─────────────────────────────────────────────────────────────────────────────
+class _QueueSink(ConsoleBuffer):
+    def __init__(self, q):
+        super().__init__()
+        self._q = q
+
+    def insert(self, text, tag=None):
+        # Semua helper (insert_matrix/insert_result/insert_separator) memanggil
+        # insert() ini, jadi cukup override di sini → semua ikut ke queue.
+        self._q.put((text, tag))
+
+    def warn(self, message):
+        self._q.put(("__WARNING__", message))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -41,6 +61,85 @@ COLOR_BUTTON_SUBTLE  = ("#F3E8FF", "#2E2E44")
 COLOR_BUTTON_TEXT    = ("#6B21A8", "#A78BFA")
 COLOR_ACCENT_CEMENT  = ("#7C3AED", "#A78BFA")   # Big action button glow
 COLOR_ACCENT_HOVER   = ("#6D28D9", "#C084FC")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SMART RANDOM (khusus halaman Diagonalisasi)
+# -----------------------------------------------------------------------------
+# Matriks acak penuh sering kali TIDAK bisa didiagonalisasi (eigenvalue kompleks
+# / defektif), yang membuat eigenvects() simbolik menggantung. Subclass ini
+# meng-override HANYA tombol Random agar selalu menghasilkan matriks yang
+# DIJAMIN bisa didiagonalisasi: A = P·D·P⁻¹.
+#
+# P dibangun dari operasi baris elementer integer (geseran), sehingga P
+# unimodular (det = ±1) dan P⁻¹ tetap bilangan bulat. Akibatnya A = P·D·P⁻¹
+# adalah matriks bulat EKSAK yang serupa (similar) dengan D — jadi pasti
+# terdiagonalisasi dengan eigenvalue bilangan bulat di D, tanpa galat
+# pembulatan yang bisa merusak sifat diagonalisabilitas.
+#
+# Tombol Random pada halaman lain TIDAK terpengaruh (mereka tetap memakai
+# MatrixInputWidget bawaan).
+# ─────────────────────────────────────────────────────────────────────────────
+class _DiagonalizableMatrixInput(MatrixInputWidget):
+    """MatrixInputWidget dengan Random yang selalu diagonalizable (Diag. only)."""
+
+    def _random_invertible_int_matrix(self, n):
+        """Bangun matriks integer invertible P (unimodular, det = ±1).
+
+        Dibangun dari identitas via operasi baris elementer integer:
+          • R_i ← R_i + k·R_j  (geseran, det tidak berubah)
+          • tukar baris acak    (det berganti tanda, tetap ±1)
+        Hasilnya selalu invertible (det ≠ 0) dengan P⁻¹ bilangan bulat.
+        """
+        import sympy as sp
+        import random
+
+        P = sp.eye(n)
+        if n == 1:
+            # 1×1: P = [[±1]] sudah invertible; A = D langsung.
+            return P
+
+        # Geseran integer secukupnya agar P "teracak" namun entri tetap kecil.
+        for _ in range(max(2 * n, 6)):
+            i, j = random.sample(range(n), 2)
+            k = random.choice([-2, -1, 1, 2])
+            P[i, :] = P[i, :] + k * P[j, :]
+
+        # Beberapa pertukaran baris acak (det tetap ±1, entri tetap bulat).
+        for _ in range(random.randint(0, n - 1)):
+            i, j = random.sample(range(n), 2)
+            P.row_swap(i, j)
+
+        # Verifikasi invertibilitas (selalu true utk konstruksi ini; jaga-jaga).
+        if P.det() == 0:
+            return self._random_invertible_int_matrix(n)
+        return P
+
+    def _random_fill(self):
+        """Override: isi grid dengan A = P·D·P⁻¹ yang dijamin diagonalizable."""
+        import sympy as sp
+        import random
+
+        n = self.current_rows
+        # Diagonalisasi hanya untuk matriks persegi → samakan kolom dgn baris.
+        if self.current_cols != n:
+            self.current_cols = n
+            self.col_var.set(str(n))
+            self._generate_grid()
+
+        # D: eigenvalue integer acak (boleh berulang) di diagonal.
+        eigenvalues = [random.randint(-9, 9) for _ in range(n)]
+        D = sp.diag(*eigenvalues)
+
+        # P invertible integer → P⁻¹ integer → A = P·D·P⁻¹ bulat & eksak.
+        P = self._random_invertible_int_matrix(n)
+        A = P * D * P.inv()
+
+        # Bulatkan ke integer terdekat agar input rapi (umumnya sudah bulat).
+        for r in range(n):
+            for c in range(n):
+                val = int(round(float(A[r, c])))
+                self.cell_vars[r][c].set(str(val))
 
 
 class DiagonalPage(ctk.CTkFrame):
@@ -176,7 +275,7 @@ class DiagonalPage(ctk.CTkFrame):
         )
         sub_a.grid(row=0, column=0, sticky="nsew")
 
-        self.matrix_input = MatrixInputWidget(
+        self.matrix_input = _DiagonalizableMatrixInput(
             sub_a, default_rows=3, default_cols=3,
             label="Matriks A (n×n)", style=self._matrix_style(toolbar_cols=3),
         )
@@ -276,28 +375,67 @@ class DiagonalPage(ctk.CTkFrame):
         self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
         self.result_console.insert("Menghitung...\n", "info")
 
-        # Jalankan komputasi berat di background thread → UI tetap responsif.
+        # State render bertahap (incremental) via queue thread-safe.
+        import queue as _queue
         import threading
-        t = threading.Thread(target=self._run_compute, args=(M,), daemon=True)
+        self._queue = _queue.Queue()
+        self._render_began = False      # apakah "Menghitung..." sudah dibersihkan
+        self._pending_warning = None    # warning ditahan sampai selesai
+
+        # Komputasi berat di background thread; langkah dialirkan via queue.
+        t = threading.Thread(target=self._run_compute, args=(M, self._queue), daemon=True)
         t.start()
+        # Main thread polling queue (non-blocking) → UI tetap responsif.
+        self.after(30, self._drain_queue)
 
-    def _run_compute(self, M):
-        """Background thread: hitung diagonalisasi tanpa menyentuh widget Tk."""
+    def _run_compute(self, M, q):
+        """Background thread: tulis tiap langkah ke queue tanpa menyentuh Tk."""
+        sink = _QueueSink(q)
         try:
-            result = self._compute_diagonal(M)
+            self._compute_diagonal(M, sink)
         except Exception as e:
-            msg = str(e)
-            self.after(0, lambda: self._on_compute_error(msg))
-            return
-        self.after(0, lambda: self._on_compute_done(result))
+            q.put(("__ERROR__", str(e)))
+        finally:
+            q.put(("__DONE__", None))
 
-    def _on_compute_done(self, result):
-        """Render hasil ke UI (dipanggil di main thread via self.after)."""
+    def _drain_queue(self):
+        """Main thread: render langkah yang tersedia secara bertahap & responsif.
+
+        Setiap siklus menguras item yang sudah ada di queue lalu menjadwalkan
+        siklus berikutnya via after() — tanpa sleep/join, jadi event loop Tk
+        tidak pernah terblokir (tidak ada "Not Responding").
+        """
+        import queue as _queue
+        try:
+            while True:
+                text, tag = self._queue.get_nowait()
+                if text == "__DONE__":
+                    self._on_compute_done()
+                    return
+                if text == "__ERROR__":
+                    self._on_compute_error(tag)
+                    return
+                if text == "__WARNING__":
+                    self._pending_warning = tag
+                    continue
+                # Langkah pertama → bersihkan pesan "Menghitung...".
+                if not self._render_began:
+                    self.result_console.clear()
+                    self._render_began = True
+                self.result_console.insert(text, tag)
+        except _queue.Empty:
+            pass
+        # Jadwalkan polling berikutnya (tetap non-blocking).
+        self.after(30, self._drain_queue)
+
+    def _on_compute_done(self):
+        """Finalisasi render (dipanggil di main thread saat worker selesai)."""
         self.calc_button.configure(state="normal", text="⚡   Diagonalisasi")
-        self.result_console.clear()
-        result["buffer"].replay(self.result_console)
-        if result.get("warning"):
-            self.error_banner.show_warning(result["warning"])
+        if not self._render_began:
+            # Tidak ada langkah terrender (kasus tak terduga) → bersihkan loader.
+            self.result_console.clear()
+        if self._pending_warning:
+            self.error_banner.show_warning(self._pending_warning)
         self.after(60, self._scroll_to_results)
 
     def _on_compute_error(self, msg):
@@ -307,18 +445,16 @@ class DiagonalPage(ctk.CTkFrame):
         self.result_console.insert_error(msg)
         self.error_banner.show_error(f"Perhitungan gagal: {msg}")
 
-    def _compute_diagonal(self, M):
+    def _compute_diagonal(self, M, buf):
         """
-        Hitung diagonalisasi A = PDP⁻¹.
+        Hitung diagonalisasi A = PDP⁻¹, menulis tiap langkah ke `buf`
+        (sebuah _QueueSink) sehingga dirender bertahap oleh main thread.
 
-        Mengembalikan dict {"buffer": ConsoleBuffer, "warning": str|None}.
         TIDAK menyentuh result_console secara langsung (thread-safe).
         Untuk matriks numerik besar (n ≥ 5) gunakan numpy demi kecepatan.
         """
         import numpy as np
-        from components.result_console import ConsoleBuffer
 
-        buf = ConsoleBuffer()
         n = M.rows
 
         buf.insert("Matriks A:\n", "info")
@@ -327,7 +463,8 @@ class DiagonalPage(ctk.CTkFrame):
 
         # ── Jalur cepat numpy: matriks murni numerik & cukup besar ──
         if is_purely_numeric(M) and n >= 5:
-            return self._compute_diagonal_numpy(M, buf)
+            self._compute_diagonal_numpy(M, buf)
+            return
 
         # ── Jalur SymPy simbolik (exact) untuk matriks kecil / simbolik ──
         eigen_data = M.eigenvects()
@@ -346,7 +483,8 @@ class DiagonalPage(ctk.CTkFrame):
                 buf.insert(
                     f"  λ = {val}: aljabar={mult}, geometri={geo_mult} {status}\n", "info"
                 )
-            return {"buffer": buf, "warning": "Matriks tidak bisa didiagonalisasi"}
+            buf.warn("Matriks tidak bisa didiagonalisasi")
+            return
 
         # Build P and D
         P_cols = []
@@ -400,8 +538,6 @@ class DiagonalPage(ctk.CTkFrame):
         else:
             buf.insert_result("Diagonalisasi selesai")
 
-        return {"buffer": buf, "warning": None}
-
     def _compute_diagonal_numpy(self, M, buf):
         """Jalur cepat diagonalisasi numerik via numpy (matriks besar)."""
         import numpy as np
@@ -419,7 +555,8 @@ class DiagonalPage(ctk.CTkFrame):
             buf.insert("❌ Matriks TIDAK bisa didiagonalisasi\n\n", "error")
             buf.insert(f"Alasan: Hanya ditemukan {rank_P} eigenvector independen,\n", "info")
             buf.insert(f"tetapi dibutuhkan {n} eigenvector untuk matriks {n}×{n}.\n", "info")
-            return {"buffer": buf, "warning": "Matriks tidak bisa didiagonalisasi"}
+            buf.warn("Matriks tidak bisa didiagonalisasi")
+            return
 
         P = eigenvectors
         D = np.diag(eigenvalues)
@@ -449,5 +586,3 @@ class DiagonalPage(ctk.CTkFrame):
             buf.insert_result("A = P·D·P⁻¹ ✓ (Terverifikasi)")
         else:
             buf.insert_result("Diagonalisasi selesai")
-
-        return {"buffer": buf, "warning": None}

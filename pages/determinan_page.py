@@ -400,18 +400,12 @@ class DeterminanPage(ctk.CTkFrame):
         console.insert(format_step_matrix(M) + "\n", "matrix")
         console.insert_separator()
 
-        # Matriks besar (n>6): skip step recording antara demi performa.
+        # Selalu rekam & tampilkan SELURUH langkah, berapa pun ukuran matriks.
         n = M.rows
-        show_steps = (n <= 6)
+        show_steps = True
 
         # Use step engine
         det, steps = determinant_by_elimination(M, show_steps=show_steps)
-
-        if not show_steps:
-            console.insert(
-                f"\n(Matriks {n}×{n} besar — langkah eliminasi disembunyikan "
-                "demi performa. Menampilkan ringkasan.)\n", "info"
-            )
 
         # Display steps
         for i, step in enumerate(steps[:-1]):  # Last step is the summary
