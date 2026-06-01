@@ -313,7 +313,9 @@ class SPLPage(ctk.CTkFrame):
             self.after(400, self._watch_theme)
 
     # =========================================================================
-    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & solver utuh)  ░░
+    # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
+    # Logika solver (Gauss, Gauss-Jordan, Matriks Balikan) tetap utuh; hanya
+    # arsitektur threading & step-recording (skip utk n>6) yang dioptimasi.
     # =========================================================================
 
     def _on_calculate(self):
@@ -338,111 +340,161 @@ class SPLPage(ctk.CTkFrame):
 
         method = self.method_selector.get()
 
-        try:
-            if method == "Gauss":
-                self._solve_gauss(A, b)
-            elif method == "Gauss-Jordan":
-                self._solve_gauss_jordan(A, b)
-            elif method == "Matriks Balikan":
-                self._solve_inverse(A, b)
-        except Exception as e:
-            self.result_console.insert_error(str(e))
-            self.error_banner.show_error(f"Perhitungan gagal: {e}")
+        self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
+        self.result_console.insert("Menghitung...\n", "info")
 
-        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        import threading
+        t = threading.Thread(target=self._run_compute, args=(A, b, method), daemon=True)
+        t.start()
+
+    def _run_compute(self, A, b, method):
+        """Background thread: selesaikan SPL tanpa menyentuh widget Tk."""
+        try:
+            from components.result_console import ConsoleBuffer
+            buf = ConsoleBuffer()
+            error = None
+            if method == "Gauss":
+                self._solve_gauss(A, b, buf)
+            elif method == "Gauss-Jordan":
+                self._solve_gauss_jordan(A, b, buf)
+            elif method == "Matriks Balikan":
+                error = self._solve_inverse(A, b, buf)
+            result = {"buffer": buf, "error": error}
+        except Exception as e:
+            msg = str(e)
+            self.after(0, lambda: self._on_compute_error(msg))
+            return
+        self.after(0, lambda: self._on_compute_done(result))
+
+    def _on_compute_done(self, result):
+        """Render hasil ke UI (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung SPL")
+        self.result_console.clear()
+        if result.get("error"):
+            self.error_banner.show_error(result["error"])
+            return
+        result["buffer"].replay(self.result_console)
         self.after(60, self._scroll_to_results)
 
-    def _solve_gauss(self, A, b):
+    def _on_compute_error(self, msg):
+        """Tampilkan error (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung SPL")
+        self.result_console.clear()
+        self.result_console.insert_error(msg)
+        self.error_banner.show_error(f"Perhitungan gagal: {msg}")
+
+    def _solve_gauss(self, A, b, console):
         """Eliminasi Gauss dengan step-by-step engine."""
         aug = A.row_join(b)
-        self.result_console.insert("Metode: Eliminasi Gauss\n\n", "step")
-        self.result_console.insert("Matriks Augmented [A|b]:\n", "info")
-        self.result_console.insert(format_step_matrix(aug, augmented_cols=b.cols) + "\n", "matrix")
-        self.result_console.insert_separator()
+        # Matriks besar (n>6): skip step recording demi performa.
+        show_steps = (A.rows <= 6 and A.cols <= 6)
+
+        console.insert("Metode: Eliminasi Gauss\n\n", "step")
+        console.insert("Matriks Augmented [A|b]:\n", "info")
+        console.insert(format_step_matrix(aug, augmented_cols=b.cols) + "\n", "matrix")
+        console.insert_separator()
 
         # Solve with step engine
-        solution, steps = solve_spl_gauss(A, b)
+        solution, steps = solve_spl_gauss(A, b, show_steps=show_steps)
+
+        if not show_steps:
+            console.insert(
+                "\n(SPL besar — langkah eliminasi disembunyikan demi performa. "
+                "Menampilkan solusi akhir.)\n", "info"
+            )
 
         # Display steps
         for i, step in enumerate(steps):
-            self.result_console.insert(f"\n▶ Langkah {i+1}: ", "step")
-            self.result_console.insert(f"{step.operation}\n", "step")
+            console.insert(f"\n▶ Langkah {i+1}: ", "step")
+            console.insert(f"{step.operation}\n", "step")
             if step.description:
-                self.result_console.insert(f"  ({step.description})\n", "info")
-            self.result_console.insert(
+                console.insert(f"  ({step.description})\n", "info")
+            console.insert(
                 format_step_matrix(step.matrix, augmented_cols=b.cols) + "\n", "matrix"
             )
 
         # Display solution
-        self._display_solution(solution)
+        self._display_solution(solution, console)
 
-    def _solve_gauss_jordan(self, A, b):
+    def _solve_gauss_jordan(self, A, b, console):
         """Eliminasi Gauss-Jordan dengan step-by-step engine."""
         aug = A.row_join(b)
-        self.result_console.insert("Metode: Eliminasi Gauss-Jordan\n\n", "step")
-        self.result_console.insert("Matriks Augmented [A|b]:\n", "info")
-        self.result_console.insert(format_step_matrix(aug, augmented_cols=b.cols) + "\n", "matrix")
-        self.result_console.insert_separator()
+        # Matriks besar (n>6): skip step recording demi performa.
+        show_steps = (A.rows <= 6 and A.cols <= 6)
+
+        console.insert("Metode: Eliminasi Gauss-Jordan\n\n", "step")
+        console.insert("Matriks Augmented [A|b]:\n", "info")
+        console.insert(format_step_matrix(aug, augmented_cols=b.cols) + "\n", "matrix")
+        console.insert_separator()
 
         # Solve with step engine
-        solution, steps = solve_spl_gauss_jordan(A, b)
+        solution, steps = solve_spl_gauss_jordan(A, b, show_steps=show_steps)
+
+        if not show_steps:
+            console.insert(
+                "\n(SPL besar — langkah eliminasi disembunyikan demi performa. "
+                "Menampilkan solusi akhir.)\n", "info"
+            )
 
         # Display steps
         for i, step in enumerate(steps):
-            self.result_console.insert(f"\n▶ Langkah {i+1}: ", "step")
-            self.result_console.insert(f"{step.operation}\n", "step")
+            console.insert(f"\n▶ Langkah {i+1}: ", "step")
+            console.insert(f"{step.operation}\n", "step")
             if step.description:
-                self.result_console.insert(f"  ({step.description})\n", "info")
-            self.result_console.insert(
+                console.insert(f"  ({step.description})\n", "info")
+            console.insert(
                 format_step_matrix(step.matrix, augmented_cols=b.cols) + "\n", "matrix"
             )
 
         # Display solution
-        self._display_solution(solution)
+        self._display_solution(solution, console)
 
-    def _solve_inverse(self, A, b):
-        """Solusi via x = A⁻¹·b."""
+    def _solve_inverse(self, A, b, console):
+        """Solusi via x = A⁻¹·b.
+
+        Mengembalikan pesan error (str) bila validasi gagal (ditampilkan via
+        banner), atau None bila sukses.
+        """
         if A.rows != A.cols:
-            self.error_banner.show_error("Matriks A harus persegi untuk metode Matriks Balikan")
-            return
+            return "Matriks A harus persegi untuk metode Matriks Balikan"
 
         det = A.det()
         if det == 0:
-            self.error_banner.show_error("Matriks A singular (det = 0), tidak bisa dihitung inversnya")
-            return
+            return "Matriks A singular (det = 0), tidak bisa dihitung inversnya"
 
-        self.result_console.insert("Metode: x = A⁻¹ · b\n\n", "step")
-        self.result_console.insert(f"det(A) = {det}\n\n", "info")
+        console.insert("Metode: x = A⁻¹ · b\n\n", "step")
+        console.insert(f"det(A) = {det}\n\n", "info")
 
         A_inv = A.inv()
-        self.result_console.insert("A⁻¹:\n", "step")
-        self.result_console.insert(format_matriks_simple(A_inv) + "\n", "matrix")
-        self.result_console.insert_separator()
+        console.insert("A⁻¹:\n", "step")
+        console.insert(format_matriks_simple(A_inv) + "\n", "matrix")
+        console.insert_separator()
 
         x = A_inv * b
-        self.result_console.insert("\nx = A⁻¹·b:\n", "step")
-        self.result_console.insert(format_matriks_simple(x) + "\n", "matrix")
+        console.insert("\nx = A⁻¹·b:\n", "step")
+        console.insert(format_matriks_simple(x) + "\n", "matrix")
 
         # Format solusi
         sol_parts = []
         for i in range(x.rows):
             sol_parts.append(f"x{i+1} = {sp.nsimplify(x[i, 0])}")
-        self.result_console.insert_result(", ".join(sol_parts))
+        console.insert_result(", ".join(sol_parts))
+        return None
 
-    def _display_solution(self, solution):
+    def _display_solution(self, solution, console):
         """Display solution info dari step engine."""
-        self.result_console.insert_separator()
+        console.insert_separator()
 
         if solution["type"] == "unique":
             values = solution["values"]
             sol_parts = [f"x{i+1} = {sp.nsimplify(v)}" for i, v in enumerate(values)]
-            self.result_console.insert_result("Solusi unik: " + ", ".join(sol_parts))
+            console.insert_result("Solusi unik: " + ", ".join(sol_parts))
 
         elif solution["type"] == "none":
-            self.result_console.insert(f"\n❌ {solution['message']}\n", "error")
+            console.insert(f"\n❌ {solution['message']}\n", "error")
 
         elif solution["type"] == "infinite":
-            self.result_console.insert(f"\n∞ {solution['message']}\n", "step")
+            console.insert(f"\n∞ {solution['message']}\n", "step")
             # Tampilkan variabel bebas
             if "pivot_cols" in solution:
                 n_vars = solution["matrix"].cols - 1
@@ -450,4 +502,4 @@ class SPLPage(ctk.CTkFrame):
                 free_vars = [i for i in range(n_vars) if i not in pivot_cols]
                 if free_vars:
                     free_str = ", ".join(f"x{i+1}" for i in free_vars)
-                    self.result_console.insert(f"  Variabel bebas: {free_str}\n", "info")
+                    console.insert(f"  Variabel bebas: {free_str}\n", "info")

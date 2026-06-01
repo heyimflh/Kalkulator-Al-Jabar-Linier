@@ -250,7 +250,9 @@ class LUPage(ctk.CTkFrame):
             self.after(400, self._watch_theme)
 
     # =========================================================================
-    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & dekomposisi utuh)  ░░
+    # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
+    # Logika dekomposisi LU (PA = LU) tetap utuh; hanya arsitektur threading
+    # yang ditambahkan agar UI tidak freeze pada matriks besar.
     # =========================================================================
 
     def _on_calculate(self):
@@ -267,23 +269,48 @@ class LUPage(ctk.CTkFrame):
             self.error_banner.show_error(f"Matriks harus persegi! Ukuran: {M.rows}×{M.cols}")
             return
 
-        try:
-            self._compute_lu(M)
-        except Exception as e:
-            self.result_console.insert_error(str(e))
-            self.error_banner.show_error(f"Dekomposisi gagal: {e}")
+        self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
+        self.result_console.insert("Menghitung...\n", "info")
 
-        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        import threading
+        t = threading.Thread(target=self._run_compute, args=(M,), daemon=True)
+        t.start()
+
+    def _run_compute(self, M):
+        """Background thread: hitung LU tanpa menyentuh widget Tk."""
+        try:
+            result = self._compute_lu(M)
+        except Exception as e:
+            msg = str(e)
+            self.after(0, lambda: self._on_compute_error(msg))
+            return
+        self.after(0, lambda: self._on_compute_done(result))
+
+    def _on_compute_done(self, result):
+        """Render hasil ke UI (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung LU")
+        self.result_console.clear()
+        result["buffer"].replay(self.result_console)
         self.after(60, self._scroll_to_results)
 
+    def _on_compute_error(self, msg):
+        """Tampilkan error (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung LU")
+        self.result_console.clear()
+        self.result_console.insert_error(msg)
+        self.error_banner.show_error(f"Dekomposisi gagal: {msg}")
+
     def _compute_lu(self, M):
-        """Hitung dekomposisi LU."""
+        """Hitung dekomposisi LU. Mengembalikan dict {"buffer": ConsoleBuffer}."""
+        from components.result_console import ConsoleBuffer
+
+        buf = ConsoleBuffer()
         n = M.rows
 
-        self.result_console.insert("Dekomposisi PA = LU\n\n", "step")
-        self.result_console.insert("Matriks A:\n", "info")
-        self.result_console.insert_matrix(format_matriks_simple(M))
-        self.result_console.insert_separator()
+        buf.insert("Dekomposisi PA = LU\n\n", "step")
+        buf.insert("Matriks A:\n", "info")
+        buf.insert_matrix(format_matriks_simple(M))
+        buf.insert_separator()
 
         # Sympy LU decomposition
         L, U, perm = M.LUdecomposition()
@@ -294,26 +321,28 @@ class LUPage(ctk.CTkFrame):
             P.row_swap(i, j)
 
         # Display results
-        self.result_console.insert("\nMatriks P (Permutasi):\n", "step")
-        self.result_console.insert_matrix(format_matriks_simple(P))
+        buf.insert("\nMatriks P (Permutasi):\n", "step")
+        buf.insert_matrix(format_matriks_simple(P))
 
-        self.result_console.insert("\nMatriks L (Lower Triangular):\n", "step")
-        self.result_console.insert_matrix(format_matriks_simple(L))
+        buf.insert("\nMatriks L (Lower Triangular):\n", "step")
+        buf.insert_matrix(format_matriks_simple(L))
 
-        self.result_console.insert("\nMatriks U (Upper Triangular):\n", "step")
-        self.result_console.insert_matrix(format_matriks_simple(U))
+        buf.insert("\nMatriks U (Upper Triangular):\n", "step")
+        buf.insert_matrix(format_matriks_simple(U))
 
         # Verifikasi
-        self.result_console.insert_separator()
+        buf.insert_separator()
         PA = P * M
         LU = L * U
-        self.result_console.insert("\nVerifikasi PA = LU:\n", "step")
-        self.result_console.insert("PA:\n", "info")
-        self.result_console.insert_matrix(format_matriks_simple(PA))
-        self.result_console.insert("\nLU:\n", "info")
-        self.result_console.insert_matrix(format_matriks_simple(LU))
+        buf.insert("\nVerifikasi PA = LU:\n", "step")
+        buf.insert("PA:\n", "info")
+        buf.insert_matrix(format_matriks_simple(PA))
+        buf.insert("\nLU:\n", "info")
+        buf.insert_matrix(format_matriks_simple(LU))
 
         if PA == LU:
-            self.result_console.insert_result("PA = LU ✓ (Terverifikasi)")
+            buf.insert_result("PA = LU ✓ (Terverifikasi)")
         else:
-            self.result_console.insert_result("Dekomposisi selesai")
+            buf.insert_result("Dekomposisi selesai")
+
+        return {"buffer": buf}

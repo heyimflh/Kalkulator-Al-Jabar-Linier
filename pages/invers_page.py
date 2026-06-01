@@ -281,7 +281,9 @@ class InversPage(ctk.CTkFrame):
             self.after(400, self._watch_theme)
 
     # =========================================================================
-    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & metode utuh)  ░░
+    # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
+    # Logika metode (Adjugate, Gauss-Jordan, Built-in) tetap utuh; hanya
+    # arsitektur threading & step-recording (skip utk n>6) yang dioptimasi.
     # =========================================================================
 
     def _on_calculate(self):
@@ -298,39 +300,72 @@ class InversPage(ctk.CTkFrame):
             self.error_banner.show_error(f"Matriks harus persegi! Ukuran: {M.rows}×{M.cols}")
             return
 
-        det = M.det()
-        if det == 0:
-            self.error_banner.show_error("Matriks singular (det = 0), invers tidak ada")
-            return
-
         method = self.method_selector.get()
 
-        try:
-            if method == "Adjugate":
-                self._inv_adjugate(M, det)
-            elif method == "Gauss-Jordan":
-                self._inv_gauss_jordan(M)
-            elif method == "Built-in":
-                self._inv_builtin(M, det)
-        except Exception as e:
-            self.result_console.insert_error(str(e))
+        # det() bisa berat utk matriks besar → hitung di background thread.
+        self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
+        self.result_console.insert("Menghitung...\n", "info")
 
-        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        import threading
+        t = threading.Thread(target=self._run_compute, args=(M, method), daemon=True)
+        t.start()
+
+    def _run_compute(self, M, method):
+        """Background thread: hitung invers tanpa menyentuh widget Tk."""
+        try:
+            det = M.det()
+            if det == 0:
+                self.after(0, lambda: self._on_singular())
+                return
+
+            from components.result_console import ConsoleBuffer
+            buf = ConsoleBuffer()
+            if method == "Adjugate":
+                self._inv_adjugate(M, det, buf)
+            elif method == "Gauss-Jordan":
+                self._inv_gauss_jordan(M, buf)
+            elif method == "Built-in":
+                self._inv_builtin(M, det, buf)
+            result = {"buffer": buf}
+        except Exception as e:
+            msg = str(e)
+            self.after(0, lambda: self._on_compute_error(msg))
+            return
+        self.after(0, lambda: self._on_compute_done(result))
+
+    def _on_compute_done(self, result):
+        """Render hasil ke UI (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung Invers")
+        self.result_console.clear()
+        result["buffer"].replay(self.result_console)
         self.after(60, self._scroll_to_results)
 
-    def _inv_adjugate(self, M, det):
+    def _on_compute_error(self, msg):
+        """Tampilkan error (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung Invers")
+        self.result_console.clear()
+        self.result_console.insert_error(msg)
+        self.error_banner.show_error(f"Perhitungan gagal: {msg}")
+
+    def _on_singular(self):
+        """Matriks singular (det = 0) — kembalikan tombol & tampilkan error."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung Invers")
+        self.result_console.clear()
+        self.error_banner.show_error("Matriks singular (det = 0), invers tidak ada")
+
+    def _inv_adjugate(self, M, det, console):
         """Invers via adjugate: A⁻¹ = (1/det) × adj(A)."""
         n = M.rows
-        self.result_console.insert("Metode: Adjugate\n", "step")
-        self.result_console.insert("A⁻¹ = (1/det(A)) × adj(A)\n\n", "info")
+        console.insert("Metode: Adjugate\n", "step")
+        console.insert("A⁻¹ = (1/det(A)) × adj(A)\n\n", "info")
 
         # Determinan
-        self.result_console.insert(f"det(A) = {det}\n\n", "info")
+        console.insert(f"det(A) = {det}\n\n", "info")
 
         # Matriks Kofaktor (step-by-step untuk matriks kecil)
         if n <= 4:
-            self.result_console.insert("Matriks Kofaktor C:\n", "step")
-            self.result_console.insert("  Cᵢⱼ = (-1)^(i+j) × det(Mᵢⱼ)\n\n", "info")
+            console.insert("Matriks Kofaktor C:\n", "step")
+            console.insert("  Cᵢⱼ = (-1)^(i+j) × det(Mᵢⱼ)\n\n", "info")
 
             cof = sp.zeros(n)
             for i in range(n):
@@ -340,78 +375,83 @@ class InversPage(ctk.CTkFrame):
                     sign = (-1) ** (i + j)
                     cof[i, j] = sign * minor_det
 
-            self.result_console.insert(format_step_matrix(cof) + "\n", "matrix")
+            console.insert(format_step_matrix(cof) + "\n", "matrix")
         else:
             cof = M.cofactor_matrix()
-            self.result_console.insert("Matriks Kofaktor:\n", "step")
-            self.result_console.insert(format_step_matrix(cof) + "\n", "matrix")
+            console.insert("Matriks Kofaktor:\n", "step")
+            console.insert(format_step_matrix(cof) + "\n", "matrix")
 
         # Adjugate = transpose kofaktor
         adj = cof.T
-        self.result_console.insert("\nAdj(A) = Cᵀ (transpose kofaktor):\n", "step")
-        self.result_console.insert(format_step_matrix(adj) + "\n", "matrix")
+        console.insert("\nAdj(A) = Cᵀ (transpose kofaktor):\n", "step")
+        console.insert(format_step_matrix(adj) + "\n", "matrix")
 
         # Invers
         inv = adj / det
-        self.result_console.insert_separator()
-        self.result_console.insert(f"\nA⁻¹ = (1/{det}) × Adj(A):\n", "step")
-        self.result_console.insert(format_step_matrix(inv) + "\n", "matrix")
-        self.result_console.insert_result("Invers berhasil dihitung via Adjugate")
+        console.insert_separator()
+        console.insert(f"\nA⁻¹ = (1/{det}) × Adj(A):\n", "step")
+        console.insert(format_step_matrix(inv) + "\n", "matrix")
+        console.insert_result("Invers berhasil dihitung via Adjugate")
 
-    def _inv_gauss_jordan(self, M):
+    def _inv_gauss_jordan(self, M, console):
         """Invers via Gauss-Jordan [A|I] → [I|A⁻¹] — step-by-step."""
         n = M.rows
         I = sp.eye(n)
         aug = M.row_join(I)
 
-        self.result_console.insert("Metode: Gauss-Jordan\n", "step")
-        self.result_console.insert("Augmentasi [A | I]:\n\n", "info")
-        self.result_console.insert(format_step_matrix(aug, augmented_cols=n) + "\n", "matrix")
-        self.result_console.insert_separator()
+        # Matriks besar (n>6): skip step recording demi performa & kepraktisan.
+        show_steps = (n <= 6)
+
+        console.insert("Metode: Gauss-Jordan\n", "step")
+        console.insert("Augmentasi [A | I]:\n\n", "info")
+        console.insert(format_step_matrix(aug, augmented_cols=n) + "\n", "matrix")
+        console.insert_separator()
 
         # Use step engine
-        try:
-            inverse, steps = gauss_jordan_inverse(M)
-        except ValueError as e:
-            self.result_console.insert_error(str(e))
-            return
+        inverse, steps = gauss_jordan_inverse(M, show_steps=show_steps)
+
+        if not show_steps:
+            console.insert(
+                f"\n(Matriks {n}×{n} besar — langkah eliminasi disembunyikan "
+                "demi performa. Menampilkan hasil akhir.)\n", "info"
+            )
 
         # Display steps
         for i, step in enumerate(steps):
-            self.result_console.insert(f"\n▶ Langkah {i+1}: ", "step")
-            self.result_console.insert(f"{step.operation}\n", "step")
+            console.insert(f"\n▶ Langkah {i+1}: ", "step")
+            console.insert(f"{step.operation}\n", "step")
             if step.description:
-                self.result_console.insert(f"  ({step.description})\n", "info")
-            self.result_console.insert(format_step_matrix(step.matrix, augmented_cols=n) + "\n", "matrix")
+                console.insert(f"  ({step.description})\n", "info")
+            console.insert(format_step_matrix(step.matrix, augmented_cols=n) + "\n", "matrix")
 
         # Final result
-        self.result_console.insert_separator()
-        self.result_console.insert(f"\nHasil [I | A⁻¹] → A⁻¹:\n", "step")
-        self.result_console.insert(format_step_matrix(inverse) + "\n", "matrix")
+        console.insert_separator()
+        console.insert(f"\nHasil [I | A⁻¹] → A⁻¹:\n", "step")
+        console.insert(format_step_matrix(inverse) + "\n", "matrix")
 
         # Verifikasi
-        self.result_console.insert(f"\nVerifikasi A × A⁻¹:\n", "info")
+        console.insert(f"\nVerifikasi A × A⁻¹:\n", "info")
         product = M * inverse
-        self.result_console.insert(format_step_matrix(product) + "\n", "matrix")
-        self.result_console.insert_result("Invers berhasil dihitung via Gauss-Jordan ✓")
+        console.insert(format_step_matrix(product) + "\n", "matrix")
+        console.insert_result("Invers berhasil dihitung via Gauss-Jordan ✓")
 
-    def _inv_builtin(self, M, det):
+    def _inv_builtin(self, M, det, console):
         """Invers via built-in sympy + verifikasi."""
-        self.result_console.insert("Metode: Built-in (sympy)\n\n", "step")
-        self.result_console.insert(f"det(A) = {det}\n\n", "info")
+        console.insert("Metode: Built-in (sympy)\n\n", "step")
+        console.insert(f"det(A) = {det}\n\n", "info")
 
         inv = M.inv()
-        self.result_console.insert("A⁻¹:\n", "step")
-        self.result_console.insert(format_step_matrix(inv) + "\n", "matrix")
+        console.insert("A⁻¹:\n", "step")
+        console.insert(format_step_matrix(inv) + "\n", "matrix")
 
         # Verifikasi
-        self.result_console.insert_separator()
-        self.result_console.insert("\nVerifikasi A × A⁻¹ = I:\n", "step")
+        console.insert_separator()
+        console.insert("\nVerifikasi A × A⁻¹ = I:\n", "step")
         product = M * inv
-        self.result_console.insert(format_step_matrix(product) + "\n", "matrix")
+        console.insert(format_step_matrix(product) + "\n", "matrix")
 
         is_identity = (product == sp.eye(M.rows))
         if is_identity:
-            self.result_console.insert_result("A × A⁻¹ = I ✓ (Terverifikasi)")
+            console.insert_result("A × A⁻¹ = I ✓ (Terverifikasi)")
         else:
-            self.result_console.insert_result("Invers berhasil dihitung")
+            console.insert_result("Invers berhasil dihitung")

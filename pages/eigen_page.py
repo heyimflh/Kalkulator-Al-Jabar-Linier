@@ -17,7 +17,10 @@ from config import FONT_HEADING, FONT_BODY, FONT_BUTTON, FONT_SMALL
 from components.matrix_input import MatrixInputWidget
 from components.result_console import ResultConsoleWidget
 from components.error_banner import ErrorBanner
-from utils.formatter import format_matriks_simple, format_polinom, normalisasi
+from utils.formatter import (
+    format_matriks_simple, format_polinom, normalisasi,
+    format_num, is_purely_numeric,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,7 +256,9 @@ class EigenPage(ctk.CTkFrame):
             self.after(400, self._watch_theme)
 
     # =========================================================================
-    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & eigen utuh)  ░░
+    # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
+    # Logika eigen (polinomial karakteristik, eigenvalues, eigenvectors) tetap
+    # utuh; hanya arsitektur (threading) & jalur cepat numpy yang ditambahkan.
     # =========================================================================
 
     def _on_calculate(self):
@@ -270,57 +275,151 @@ class EigenPage(ctk.CTkFrame):
             self.error_banner.show_error(f"Matriks harus persegi! Ukuran: {M.rows}×{M.cols}")
             return
 
-        try:
-            self._compute_eigen(M)
-        except Exception as e:
-            self.result_console.insert_error(str(e))
-            self.error_banner.show_error(f"Perhitungan gagal: {e}")
+        # Disable tombol + tampilkan loading (ringan, di main thread).
+        self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
+        self.result_console.insert("Menghitung...\n", "info")
 
-        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        import threading
+        t = threading.Thread(target=self._run_compute, args=(M,), daemon=True)
+        t.start()
+
+    def _run_compute(self, M):
+        """Background thread: hitung eigen tanpa menyentuh widget Tk."""
+        try:
+            result = self._compute_eigen(M)
+        except Exception as e:
+            msg = str(e)
+            self.after(0, lambda: self._on_compute_error(msg))
+            return
+        self.after(0, lambda: self._on_compute_done(result))
+
+    def _on_compute_done(self, result):
+        """Render hasil ke UI (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung Eigen")
+        self.result_console.clear()
+        result["buffer"].replay(self.result_console)
         self.after(60, self._scroll_to_results)
 
+    def _on_compute_error(self, msg):
+        """Tampilkan error (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung Eigen")
+        self.result_console.clear()
+        self.result_console.insert_error(msg)
+        self.error_banner.show_error(f"Perhitungan gagal: {msg}")
+
     def _compute_eigen(self, M):
-        """Hitung eigenvalues dan eigenvectors."""
-        self.result_console.insert("Matriks A:\n", "info")
-        self.result_console.insert_matrix(format_matriks_simple(M))
-        self.result_console.insert_separator()
+        """
+        Hitung eigenvalues dan eigenvectors.
+
+        Mengembalikan dict {"buffer": ConsoleBuffer}. TIDAK menyentuh
+        result_console langsung (thread-safe). Untuk matriks numerik besar
+        (n ≥ 5) gunakan numpy demi kecepatan.
+        """
+        from components.result_console import ConsoleBuffer
+
+        buf = ConsoleBuffer()
+        buf.insert("Matriks A:\n", "info")
+        buf.insert_matrix(format_matriks_simple(M))
+        buf.insert_separator()
+
+        # ── Jalur cepat numpy untuk matriks numerik besar ──
+        if is_purely_numeric(M) and M.rows >= 5:
+            return self._compute_eigen_numpy(M, buf)
 
         # Polinomial Karakteristik
         lam = sp.Symbol('λ')
         char_poly = sp.expand(M.charpoly(lam).as_expr())
 
-        self.result_console.insert("\nPolinomial Karakteristik:\n", "step")
-        self.result_console.insert(f"  p(λ) = {format_polinom(char_poly)}\n\n", "matrix")
+        buf.insert("\nPolinomial Karakteristik:\n", "step")
+        buf.insert(f"  p(λ) = {format_polinom(char_poly)}\n\n", "matrix")
 
         # Eigenvalues
-        self.result_console.insert("Eigenvalues:\n", "step")
+        buf.insert("Eigenvalues:\n", "step")
         eigenvals = M.eigenvals()
         for val, mult in eigenvals.items():
-            self.result_console.insert(f"  λ = {val}", "result")
+            buf.insert(f"  λ = {val}", "result")
             if mult > 1:
-                self.result_console.insert(f"  (multiplisitas aljabar = {mult})", "info")
-            self.result_console.insert("\n", None)
+                buf.insert(f"  (multiplisitas aljabar = {mult})", "info")
+            buf.insert("\n", None)
 
         # Eigenvectors
-        self.result_console.insert_separator()
-        self.result_console.insert("\nEigenvectors:\n", "step")
+        buf.insert_separator()
+        buf.insert("\nEigenvectors:\n", "step")
 
         eigenvects = M.eigenvects()
         for val, mult, vects in eigenvects:
-            self.result_console.insert(f"\n  Untuk λ = {val}:\n", "step")
-            self.result_console.insert(f"  Multiplisitas aljabar = {mult}\n", "info")
-            self.result_console.insert(f"  Multiplisitas geometri = {len(vects)}\n", "info")
-            self.result_console.insert(f"  Basis eigenspace:\n", "info")
+            buf.insert(f"\n  Untuk λ = {val}:\n", "step")
+            buf.insert(f"  Multiplisitas aljabar = {mult}\n", "info")
+            buf.insert(f"  Multiplisitas geometri = {len(vects)}\n", "info")
+            buf.insert(f"  Basis eigenspace:\n", "info")
 
             for i, v in enumerate(vects):
                 normalized = normalisasi(v)
-                self.result_console.insert(f"    v{i+1} = {tuple(normalized)}\n", "result")
+                buf.insert(f"    v{i+1} = {tuple(normalized)}\n", "result")
 
-        self.result_console.insert_separator()
+        buf.insert_separator()
         total_vects = sum(len(v[2]) for v in eigenvects)
-        self.result_console.insert(f"\nTotal eigenvectors independen: {total_vects}\n", "info")
+        buf.insert(f"\nTotal eigenvectors independen: {total_vects}\n", "info")
 
         if total_vects == M.rows:
-            self.result_console.insert_result("Matriks BISA didiagonalisasi (n eigenvector independen)")
+            buf.insert_result("Matriks BISA didiagonalisasi (n eigenvector independen)")
         else:
-            self.result_console.insert(f"⚠️ Matriks TIDAK bisa didiagonalisasi ({total_vects} < {M.rows})\n", "error")
+            buf.insert(f"⚠️ Matriks TIDAK bisa didiagonalisasi ({total_vects} < {M.rows})\n", "error")
+
+        return {"buffer": buf}
+
+    def _compute_eigen_numpy(self, M, buf):
+        """Jalur cepat eigen numerik via numpy (matriks besar)."""
+        import numpy as np
+
+        M_np = np.array(M.tolist(), dtype=float)
+        eigenvalues, eigenvectors = np.linalg.eig(M_np)
+        n = M.rows
+
+        buf.insert("Pendekatan numerik (numpy) untuk matriks besar.\n", "info")
+
+        # Polinomial karakteristik (koefisien numerik via numpy).
+        coeffs = np.poly(M_np)
+        buf.insert("\nPolinomial Karakteristik:\n", "step")
+        buf.insert(f"  p(λ) = {self._poly_str_from_coeffs(coeffs)}\n\n", "matrix")
+
+        # Eigenvalues
+        buf.insert("Eigenvalues:\n", "step")
+        for i, val in enumerate(eigenvalues):
+            buf.insert(f"  λ{i+1} = {format_num(val)}\n", "result")
+
+        # Eigenvectors (kolom dari numpy, ternormalisasi numpy)
+        buf.insert_separator()
+        buf.insert("\nEigenvectors (kolom):\n", "step")
+        for i in range(n):
+            vec = eigenvectors[:, i]
+            comps = ", ".join(format_num(c) for c in vec)
+            buf.insert(f"  v{i+1} (λ = {format_num(eigenvalues[i])}) = ({comps})\n", "result")
+
+        # Diagonalizability via rank P
+        buf.insert_separator()
+        rank_P = np.linalg.matrix_rank(eigenvectors)
+        buf.insert(f"\nTotal eigenvectors independen: {rank_P}\n", "info")
+        if rank_P == n:
+            buf.insert_result("Matriks BISA didiagonalisasi (n eigenvector independen)")
+        else:
+            buf.insert(f"⚠️ Matriks TIDAK bisa didiagonalisasi ({rank_P} < {n})\n", "error")
+
+        return {"buffer": buf}
+
+    @staticmethod
+    def _poly_str_from_coeffs(coeffs):
+        """Bangun string polinomial p(λ) dari koefisien numpy (desc power)."""
+        from utils.formatter import format_num as _fn
+        deg = len(coeffs) - 1
+        terms = []
+        for i, c in enumerate(coeffs):
+            power = deg - i
+            cs = _fn(c)
+            if power == 0:
+                terms.append(f"{cs}")
+            elif power == 1:
+                terms.append(f"{cs}·λ")
+            else:
+                terms.append(f"{cs}·λ^{power}")
+        return " + ".join(terms)

@@ -7,6 +7,53 @@ import tkinter as tk
 from config import FONT_CONSOLE, FONT_SMALL, FONT_BODY
 
 
+class ConsoleBuffer:
+    """
+    Penampung output console untuk dipakai di BACKGROUND THREAD.
+
+    API-nya mirror ResultConsoleWidget (insert, insert_matrix, insert_result,
+    dst.) sehingga fungsi komputasi berat bisa "menulis" hasil tanpa menyentuh
+    widget Tkinter sama sekali. Semua output dikumpulkan sebagai list of
+    (text, tag) tuples, lalu di-`replay()` ke console asli dari main thread.
+
+    Tujuan: komputasi berat (SymPy/numpy) aman dijalankan di thread terpisah
+    tanpa membekukan event loop Tkinter, sementara rendering tetap di main
+    thread (Tk tidak thread-safe).
+    """
+
+    def __init__(self):
+        self.ops = []  # list of (text, tag)
+
+    # ── API mirror dari ResultConsoleWidget ──
+    def insert(self, text, tag=None):
+        self.ops.append((text, tag))
+
+    def insert_step(self, step_num, description):
+        self.insert(f"\n▶ Langkah {step_num}: ", "step")
+        self.insert(f"{description}\n", "step")
+
+    def insert_matrix(self, matrix_str):
+        self.insert(f"{matrix_str}\n", "matrix")
+
+    def insert_result(self, text):
+        self.insert("\n" + "═" * 45 + "\n", "separator")
+        self.insert(f"✅ {text}\n", "result")
+
+    def insert_error(self, text):
+        self.insert(f"\n⚠️ {text}\n", "error")
+
+    def insert_info(self, text):
+        self.insert(f"{text}\n", "info")
+
+    def insert_separator(self):
+        self.insert("\n" + "─" * 45 + "\n", "separator")
+
+    def replay(self, console):
+        """Render seluruh output yang terkumpul ke console asli (main thread)."""
+        for text, tag in self.ops:
+            console.insert(text, tag)
+
+
 class ResultConsoleWidget(ctk.CTkFrame):
     """
     Widget output hasil perhitungan dengan:

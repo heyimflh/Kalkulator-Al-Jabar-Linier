@@ -252,7 +252,9 @@ class SVDPage(ctk.CTkFrame):
             self.after(400, self._watch_theme)
 
     # =========================================================================
-    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & SVD numpy)  ░░
+    # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
+    # Logika SVD (A = UΣVᵀ via numpy) tetap utuh; dipindah ke background
+    # thread untuk konsistensi & agar UI tidak freeze pada matriks besar.
     # =========================================================================
 
     def _on_calculate(self):
@@ -265,24 +267,49 @@ class SVDPage(ctk.CTkFrame):
             self.error_banner.show_error(str(e))
             return
 
-        try:
-            self._compute_svd(M)
-        except Exception as e:
-            self.result_console.insert_error(str(e))
-            self.error_banner.show_error(f"Perhitungan gagal: {e}")
+        self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
+        self.result_console.insert("Menghitung...\n", "info")
 
-        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        import threading
+        t = threading.Thread(target=self._run_compute, args=(M,), daemon=True)
+        t.start()
+
+    def _run_compute(self, M):
+        """Background thread: hitung SVD tanpa menyentuh widget Tk."""
+        try:
+            result = self._compute_svd(M)
+        except Exception as e:
+            msg = str(e)
+            self.after(0, lambda: self._on_compute_error(msg))
+            return
+        self.after(0, lambda: self._on_compute_done(result))
+
+    def _on_compute_done(self, result):
+        """Render hasil ke UI (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung SVD")
+        self.result_console.clear()
+        result["buffer"].replay(self.result_console)
         self.after(60, self._scroll_to_results)
 
+    def _on_compute_error(self, msg):
+        """Tampilkan error (main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Hitung SVD")
+        self.result_console.clear()
+        self.result_console.insert_error(msg)
+        self.error_banner.show_error(f"Perhitungan gagal: {msg}")
+
     def _compute_svd(self, M):
-        """Hitung SVD menggunakan numpy."""
+        """Hitung SVD menggunakan numpy. Mengembalikan dict {"buffer": ...}."""
+        from components.result_console import ConsoleBuffer
+
+        buf = ConsoleBuffer()
         m, n = M.shape
 
-        self.result_console.insert(f"Matriks A ({m}×{n}):\n", "info")
+        buf.insert(f"Matriks A ({m}×{n}):\n", "info")
         # Convert to numpy
         M_np = np.array(M.tolist(), dtype=float)
-        self.result_console.insert_matrix(format_numpy_matrix(M_np, decimals=2))
-        self.result_console.insert_separator()
+        buf.insert_matrix(format_numpy_matrix(M_np, decimals=2))
+        buf.insert_separator()
 
         # Compute SVD
         U, s, Vt = np.linalg.svd(M_np)
@@ -292,36 +319,38 @@ class SVDPage(ctk.CTkFrame):
         np.fill_diagonal(Sigma, s)
 
         # Display U
-        self.result_console.insert(f"\nMatriks U ({m}×{m}) — orthogonal:\n", "step")
-        self.result_console.insert_matrix(format_numpy_matrix(U))
+        buf.insert(f"\nMatriks U ({m}×{m}) — orthogonal:\n", "step")
+        buf.insert_matrix(format_numpy_matrix(U))
 
         # Display Sigma
-        self.result_console.insert(f"\nMatriks Σ ({m}×{n}) — diagonal:\n", "step")
-        self.result_console.insert_matrix(format_numpy_matrix(Sigma))
+        buf.insert(f"\nMatriks Σ ({m}×{n}) — diagonal:\n", "step")
+        buf.insert_matrix(format_numpy_matrix(Sigma))
 
         # Display Vt
-        self.result_console.insert(f"\nMatriks Vᵀ ({n}×{n}) — orthogonal:\n", "step")
-        self.result_console.insert_matrix(format_numpy_matrix(Vt))
+        buf.insert(f"\nMatriks Vᵀ ({n}×{n}) — orthogonal:\n", "step")
+        buf.insert_matrix(format_numpy_matrix(Vt))
 
         # Singular values
-        self.result_console.insert_separator()
-        self.result_console.insert("\nSingular Values:\n", "step")
+        buf.insert_separator()
+        buf.insert("\nSingular Values:\n", "step")
         for i, sv in enumerate(s):
-            self.result_console.insert(f"  σ{i+1} = {sv:.6f}\n", "result")
+            buf.insert(f"  σ{i+1} = {sv:.6f}\n", "result")
 
         # Rank
         tol = max(m, n) * np.finfo(float).eps * s[0]
         rank = np.sum(s > tol)
-        self.result_console.insert(f"\nRank matriks: {rank}\n", "info")
+        buf.insert(f"\nRank matriks: {rank}\n", "info")
 
         # Verifikasi
-        self.result_console.insert_separator()
+        buf.insert_separator()
         reconstructed = U @ Sigma @ Vt
         error = np.max(np.abs(M_np - reconstructed))
-        self.result_console.insert(f"\nVerifikasi A = U·Σ·Vᵀ:\n", "step")
-        self.result_console.insert(f"  Max error rekonstruksi: {error:.2e}\n", "info")
+        buf.insert(f"\nVerifikasi A = U·Σ·Vᵀ:\n", "step")
+        buf.insert(f"  Max error rekonstruksi: {error:.2e}\n", "info")
 
         if error < 1e-10:
-            self.result_console.insert_result(f"SVD berhasil ✓ (rank = {rank})")
+            buf.insert_result(f"SVD berhasil ✓ (rank = {rank})")
         else:
-            self.result_console.insert_result(f"SVD selesai (rank = {rank})")
+            buf.insert_result(f"SVD selesai (rank = {rank})")
+
+        return {"buffer": buf}

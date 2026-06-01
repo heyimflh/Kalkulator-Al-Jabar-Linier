@@ -156,3 +156,75 @@ def normalisasi(v):
         v_int = [x // gcd for x in v_int]
 
     return v_int
+
+
+# =============================================================================
+# NUMERIC FORMATTING HELPERS — untuk fallback numpy (matriks besar)
+# =============================================================================
+
+def format_num(value, decimals=4):
+    """
+    Format satu nilai numerik (real / kompleks dari numpy) menjadi string rapi.
+    - Membersihkan noise floating-point (mis. 1.9999999 → 2, -0.0 → 0).
+    - Mendukung bilangan kompleks (eigenvalue matriks non-simetris).
+    """
+    def _clean(x):
+        # Bulatkan; jika sangat dekat ke integer, tampilkan sebagai integer.
+        xr = round(float(x), decimals)
+        if abs(xr - round(xr)) < 10 ** (-decimals):
+            xr = float(round(xr))
+        if xr == 0:
+            xr = 0.0  # hilangkan -0.0
+        if xr == int(xr):
+            return str(int(xr))
+        return f"{xr:.{decimals}f}"
+
+    val = complex(value)
+    if abs(val.imag) < 10 ** (-decimals):
+        return _clean(val.real)
+    # Kompleks: a ± bi
+    real_str = _clean(val.real)
+    imag_abs = _clean(abs(val.imag))
+    sign = "+" if val.imag >= 0 else "-"
+    return f"{real_str} {sign} {imag_abs}i"
+
+
+def format_numeric_matrix(M, decimals=4):
+    """
+    Format matriks numerik (numpy array / list) dengan pembersihan noise &
+    dukungan bilangan kompleks. Output aligned tanpa border (gaya simple).
+    """
+    import numpy as np
+
+    if isinstance(M, np.ndarray):
+        rows = M.tolist()
+    else:
+        rows = M
+
+    str_rows = [[format_num(v, decimals) for v in row] for row in rows]
+
+    if not str_rows:
+        return "[ ]"
+
+    n_cols = len(str_rows[0])
+    col_widths = [max(len(str_rows[r][c]) for r in range(len(str_rows)))
+                  for c in range(n_cols)]
+
+    lines = []
+    for row in str_rows:
+        cells = "   ".join(row[c].rjust(col_widths[c]) for c in range(n_cols))
+        lines.append(f"[ {cells} ]")
+    return "\n".join(lines)
+
+
+def is_purely_numeric(matrix):
+    """
+    True bila SEMUA elemen sympy Matrix murni numerik (tanpa simbol),
+    sehingga aman menggunakan pendekatan numpy untuk kecepatan.
+    """
+    import sympy as sp
+    return all(
+        isinstance(v, (int, float, sp.Integer, sp.Float, sp.Rational))
+        or (getattr(v, "is_number", False) and not v.free_symbols)
+        for v in matrix
+    )

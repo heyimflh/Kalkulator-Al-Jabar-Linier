@@ -17,7 +17,10 @@ from config import FONT_HEADING, FONT_BODY, FONT_BUTTON, FONT_SMALL
 from components.matrix_input import MatrixInputWidget
 from components.result_console import ResultConsoleWidget
 from components.error_banner import ErrorBanner
-from utils.formatter import format_matriks_simple, normalisasi
+from utils.formatter import (
+    format_matriks_simple, normalisasi,
+    format_numeric_matrix, format_num, is_purely_numeric,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -250,7 +253,9 @@ class DiagonalPage(ctk.CTkFrame):
             self.after(400, self._watch_theme)
 
     # =========================================================================
-    # ░░  LOGIKA PERHITUNGAN — TIDAK DIUBAH (data binding & diagonalisasi)  ░░
+    # ░░  LOGIKA PERHITUNGAN — komputasi berat di BACKGROUND THREAD  ░░
+    # Logika matematika diagonalisasi (A = PDP⁻¹) tetap utuh; hanya
+    # arsitektur (threading) & verifikasi yang dioptimasi agar UI tak freeze.
     # =========================================================================
 
     def _on_calculate(self):
@@ -267,56 +272,94 @@ class DiagonalPage(ctk.CTkFrame):
             self.error_banner.show_error(f"Matriks harus persegi! Ukuran: {M.rows}×{M.cols}")
             return
 
-        try:
-            self._compute_diagonal(M)
-        except Exception as e:
-            self.result_console.insert_error(str(e))
-            self.error_banner.show_error(f"Perhitungan gagal: {e}")
+        # Disable tombol + tampilkan loading (ringan, di main thread).
+        self.calc_button.configure(state="disabled", text="⏳  Menghitung...")
+        self.result_console.insert("Menghitung...\n", "info")
 
-        # UX: arahkan tampilan ke hasil setelah konten ter-render.
+        # Jalankan komputasi berat di background thread → UI tetap responsif.
+        import threading
+        t = threading.Thread(target=self._run_compute, args=(M,), daemon=True)
+        t.start()
+
+    def _run_compute(self, M):
+        """Background thread: hitung diagonalisasi tanpa menyentuh widget Tk."""
+        try:
+            result = self._compute_diagonal(M)
+        except Exception as e:
+            msg = str(e)
+            self.after(0, lambda: self._on_compute_error(msg))
+            return
+        self.after(0, lambda: self._on_compute_done(result))
+
+    def _on_compute_done(self, result):
+        """Render hasil ke UI (dipanggil di main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Diagonalisasi")
+        self.result_console.clear()
+        result["buffer"].replay(self.result_console)
+        if result.get("warning"):
+            self.error_banner.show_warning(result["warning"])
         self.after(60, self._scroll_to_results)
 
+    def _on_compute_error(self, msg):
+        """Tampilkan error (dipanggil di main thread via self.after)."""
+        self.calc_button.configure(state="normal", text="⚡   Diagonalisasi")
+        self.result_console.clear()
+        self.result_console.insert_error(msg)
+        self.error_banner.show_error(f"Perhitungan gagal: {msg}")
+
     def _compute_diagonal(self, M):
-        """Hitung diagonalisasi A = PDP⁻¹."""
+        """
+        Hitung diagonalisasi A = PDP⁻¹.
+
+        Mengembalikan dict {"buffer": ConsoleBuffer, "warning": str|None}.
+        TIDAK menyentuh result_console secara langsung (thread-safe).
+        Untuk matriks numerik besar (n ≥ 5) gunakan numpy demi kecepatan.
+        """
+        import numpy as np
+        from components.result_console import ConsoleBuffer
+
+        buf = ConsoleBuffer()
         n = M.rows
 
-        self.result_console.insert("Matriks A:\n", "info")
-        self.result_console.insert_matrix(format_matriks_simple(M))
-        self.result_console.insert_separator()
+        buf.insert("Matriks A:\n", "info")
+        buf.insert_matrix(format_matriks_simple(M))
+        buf.insert_separator()
 
-        # Get eigenvectors
+        # ── Jalur cepat numpy: matriks murni numerik & cukup besar ──
+        if is_purely_numeric(M) and n >= 5:
+            return self._compute_diagonal_numpy(M, buf)
+
+        # ── Jalur SymPy simbolik (exact) untuk matriks kecil / simbolik ──
         eigen_data = M.eigenvects()
         total_vects = sum(len(v[2]) for v in eigen_data)
 
         if total_vects < n:
-            self.result_console.insert("\n", None)
-            self.result_console.insert("❌ Matriks TIDAK bisa didiagonalisasi\n\n", "error")
-            self.result_console.insert(f"Alasan: Hanya ditemukan {total_vects} eigenvector independen,\n", "info")
-            self.result_console.insert(f"tetapi dibutuhkan {n} eigenvector untuk matriks {n}×{n}.\n\n", "info")
+            buf.insert("\n", None)
+            buf.insert("❌ Matriks TIDAK bisa didiagonalisasi\n\n", "error")
+            buf.insert(f"Alasan: Hanya ditemukan {total_vects} eigenvector independen,\n", "info")
+            buf.insert(f"tetapi dibutuhkan {n} eigenvector untuk matriks {n}×{n}.\n\n", "info")
 
-            # Tampilkan eigenvalues yang bermasalah
-            self.result_console.insert("Detail eigenvalues:\n", "step")
+            buf.insert("Detail eigenvalues:\n", "step")
             for val, mult, vects in eigen_data:
                 geo_mult = len(vects)
                 status = "✓" if geo_mult == mult else "✗"
-                self.result_console.insert(
+                buf.insert(
                     f"  λ = {val}: aljabar={mult}, geometri={geo_mult} {status}\n", "info"
                 )
-            self.error_banner.show_warning("Matriks tidak bisa didiagonalisasi")
-            return
+            return {"buffer": buf, "warning": "Matriks tidak bisa didiagonalisasi"}
 
         # Build P and D
         P_cols = []
         D_vals = []
 
-        self.result_console.insert("\nEigenvectors (kolom P):\n", "step")
+        buf.insert("\nEigenvectors (kolom P):\n", "step")
         col_idx = 1
         for val, mult, vects in eigen_data:
             for v in vects:
                 normalized = normalisasi(v)
                 P_cols.append(normalized)
                 D_vals.append(val)
-                self.result_console.insert(f"  p{col_idx} = {tuple(normalized)}  (λ = {val})\n", "info")
+                buf.insert(f"  p{col_idx} = {tuple(normalized)}  (λ = {val})\n", "info")
                 col_idx += 1
 
         # Construct matrices
@@ -324,24 +367,87 @@ class DiagonalPage(ctk.CTkFrame):
         D = sp.diag(*D_vals)
         P_inv = P.inv()
 
-        self.result_console.insert_separator()
+        buf.insert_separator()
 
-        self.result_console.insert("\nMatriks P (eigenvectors):\n", "step")
-        self.result_console.insert_matrix(format_matriks_simple(P))
+        buf.insert("\nMatriks P (eigenvectors):\n", "step")
+        buf.insert_matrix(format_matriks_simple(P))
 
-        self.result_console.insert("\nMatriks D (diagonal eigenvalues):\n", "step")
-        self.result_console.insert_matrix(format_matriks_simple(D))
+        buf.insert("\nMatriks D (diagonal eigenvalues):\n", "step")
+        buf.insert_matrix(format_matriks_simple(D))
 
-        self.result_console.insert("\nMatriks P⁻¹:\n", "step")
-        self.result_console.insert_matrix(format_matriks_simple(P_inv))
+        buf.insert("\nMatriks P⁻¹:\n", "step")
+        buf.insert_matrix(format_matriks_simple(P_inv))
 
-        # Verifikasi
-        self.result_console.insert_separator()
-        self.result_console.insert("\nVerifikasi A = P·D·P⁻¹:\n", "step")
+        # Verifikasi (numpy allclose — jauh lebih cepat dari sp.simplify)
+        buf.insert_separator()
+        buf.insert("\nVerifikasi A = P·D·P⁻¹:\n", "step")
         product = P * D * P_inv
-        self.result_console.insert_matrix(format_matriks_simple(product))
+        buf.insert_matrix(format_matriks_simple(product))
 
-        if sp.simplify(product - M) == sp.zeros(n):
-            self.result_console.insert_result("A = P·D·P⁻¹ ✓ (Terverifikasi)")
+        diff = product - M
+        try:
+            verified = np.allclose(
+                np.array(diff.tolist(), dtype=float),
+                np.zeros((n, n)),
+                atol=1e-6,
+            )
+        except (TypeError, ValueError):
+            # Simbolik/kompleks: fallback ke norm (tetap lebih ringan dari simplify)
+            verified = (diff.norm() < 1e-6)
+
+        if verified:
+            buf.insert_result("A = P·D·P⁻¹ ✓ (Terverifikasi)")
         else:
-            self.result_console.insert_result("Diagonalisasi selesai")
+            buf.insert_result("Diagonalisasi selesai")
+
+        return {"buffer": buf, "warning": None}
+
+    def _compute_diagonal_numpy(self, M, buf):
+        """Jalur cepat diagonalisasi numerik via numpy (matriks besar)."""
+        import numpy as np
+
+        M_np = np.array(M.tolist(), dtype=float)
+        eigenvalues, eigenvectors = np.linalg.eig(M_np)
+        n = M.rows
+
+        buf.insert("Pendekatan numerik (numpy) untuk matriks besar.\n", "info")
+
+        # Cek diagonalizability: butuh n eigenvector independen → rank P = n.
+        rank_P = np.linalg.matrix_rank(eigenvectors)
+        if rank_P < n:
+            buf.insert("\n", None)
+            buf.insert("❌ Matriks TIDAK bisa didiagonalisasi\n\n", "error")
+            buf.insert(f"Alasan: Hanya ditemukan {rank_P} eigenvector independen,\n", "info")
+            buf.insert(f"tetapi dibutuhkan {n} eigenvector untuk matriks {n}×{n}.\n", "info")
+            return {"buffer": buf, "warning": "Matriks tidak bisa didiagonalisasi"}
+
+        P = eigenvectors
+        D = np.diag(eigenvalues)
+        P_inv = np.linalg.inv(P)
+
+        buf.insert("\nEigenvalues (diagonal D):\n", "step")
+        for i, val in enumerate(eigenvalues):
+            buf.insert(f"  λ{i+1} = {format_num(val)}\n", "info")
+
+        buf.insert_separator()
+        buf.insert("\nMatriks P (eigenvectors, ternormalisasi numpy):\n", "step")
+        buf.insert_matrix(format_numeric_matrix(P))
+
+        buf.insert("\nMatriks D (diagonal eigenvalues):\n", "step")
+        buf.insert_matrix(format_numeric_matrix(D))
+
+        buf.insert("\nMatriks P⁻¹:\n", "step")
+        buf.insert_matrix(format_numeric_matrix(P_inv))
+
+        # Verifikasi numerik
+        buf.insert_separator()
+        buf.insert("\nVerifikasi A = P·D·P⁻¹:\n", "step")
+        product = P @ D @ P_inv
+        buf.insert_matrix(format_numeric_matrix(product))
+
+        if np.allclose(product, M_np, atol=1e-6):
+            buf.insert_result("A = P·D·P⁻¹ ✓ (Terverifikasi)")
+        else:
+            buf.insert_result("Diagonalisasi selesai")
+
+        return {"buffer": buf, "warning": None}
