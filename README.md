@@ -1,5 +1,3 @@
-
-````markdown
 <div align="center">
 
 # 🧮 Linear Algebra Dashboard Pro
@@ -1570,7 +1568,7 @@ Project ini dibuat sebagai bentuk eksplorasi dan implementasi pembelajaran Aljab
 </p>
 
 </div>
-```
+
 ::contentReference[oaicite:2]{index=2}
 
 [1]: https://github.com/heyimflh/Kalkulator-Al-Jabar-Linier.git "GitHub - heyimflh/Kalkulator-Al-Jabar-Linier: Kalkulator Aljabar Linear Modern — GUI Dashboard dengan Step-by-Step · GitHub"
