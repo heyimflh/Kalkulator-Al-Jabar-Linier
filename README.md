@@ -48,23 +48,45 @@ Aplikasi ini dibuat dengan konsep **single-window dashboard**, sehingga semua fi
 
 ---
 
-## 🌌 Preview Konsep Tampilan
+## 🖼️ Preview Aplikasi
 
-> Tambahkan screenshot aplikasi di folder `assets/` atau `docs/`, lalu ubah path gambar di bawah sesuai nama file screenshot kamu.
+Berikut adalah tampilan dari **Linear Algebra Dashboard Pro** yang sudah dilengkapi dengan dashboard modern, mode gelap/terang, input matriks visual, serta hasil perhitungan step-by-step.
 
-<div align="center">
+---
 
-### Dashboard Utama
+### 🌙 Dashboard Dark Mode
 
-![Dashboard Preview](docs/screenshot-dashboard.png)
+<p align="center">
+  <img src="docs/Screenshot-dashboard-dark.png" width="850" alt="Dashboard Dark Mode">
+</p>
 
-### Contoh Output Step-by-Step
+<p align="center">
+  Tampilan dashboard utama dalam mode gelap dengan desain modern, sidebar navigation, dan ringkasan fitur aljabar linear.
+</p>
 
-![Step by Step Preview](docs/screenshot-step-by-step.png)
+---
 
-</div>
+### ☀️ Dashboard Light Mode
 
-Jika belum punya screenshot, bagian gambar di atas bisa dibiarkan dulu atau dihapus sementara.
+<p align="center">
+  <img src="docs/Screenshot-dashboard-light.png" width="850" alt="Dashboard Light Mode">
+</p>
+
+<p align="center">
+  Tampilan dashboard utama dalam mode terang yang bersih, minimalis, dan nyaman digunakan untuk belajar.
+</p>
+
+---
+
+### 📚 Output Step-by-Step
+
+<p align="center">
+  <img src="docs/Screenshot-step-by-step.png" width="850" alt="Output Step by Step">
+</p>
+
+<p align="center">
+  Contoh tampilan hasil perhitungan yang menampilkan proses penyelesaian secara bertahap agar pengguna dapat memahami alur matematisnya.
+</p>
 
 ---
 
