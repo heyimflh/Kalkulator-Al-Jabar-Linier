@@ -1,5 +1,5 @@
 # =============================================================================
-# STATUS_BAR.PY — AXIOM Status Bar (Polished)
+# STATUS_BAR.PY — FIATRIX Status Bar (Polished)
 # =============================================================================
 # Clean, minimal status bar with proper contrast and spacing.
 # =============================================================================

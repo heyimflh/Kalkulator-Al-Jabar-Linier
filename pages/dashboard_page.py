@@ -1,5 +1,5 @@
 # =============================================================================
-# DASHBOARD_PAGE.PY — AXIOM × COSMIC NIGHT Dashboard
+# DASHBOARD_PAGE.PY — FIATRIX × COSMIC NIGHT Dashboard
 # =============================================================================
 # Dark theme inspired by tweakcn "Cosmic Night":
 #   https://tweakcn.com/editor/theme?theme=cosmic-night
@@ -178,7 +178,7 @@ R_BTN   = CORNER_RADIUS_BTN
 # ═════════════════════════════════════════════════════════════════════════════
 class DashboardPage(ctk.CTkScrollableFrame):
     """
-    AXIOM Dashboard — dual theme.
+    FIATRIX Dashboard — dual theme.
     Light = "Amethyst Haze" (soft lavender academic look),
     Dark  = "Cosmic Night" (deep space with neon lavender highlights).
     Switches live via ctk.set_appearance_mode("Light"/"Dark").
@@ -367,14 +367,23 @@ class DashboardPage(ctk.CTkScrollableFrame):
 
         dots = ctk.CTkFrame(chrome, fg_color="transparent")
         dots.pack(side="left")
-        for color in (ACC_ROSE, COLOR_ACCENT_PRIMARY, ACC_CYAN):
-            ctk.CTkFrame(
-                dots, width=10, height=10,
-                corner_radius=5, fg_color=color,
-            ).pack(side="left", padx=2)
+        
+        traffic_colors = [
+            ("#FF5F57", "#FF5F57"),
+            ("#FFBD2E", "#FFBD2E"),
+            ("#28C840", "#28C840"),
+        ]
+        
+        for color in traffic_colors:
+            dot = ctk.CTkFrame(
+                dots, width=11, height=11,
+                corner_radius=999, fg_color=color,
+            )
+            dot.pack(side="left", padx=(0, 7))
+            dot.pack_propagate(False)
 
         ctk.CTkLabel(
-            chrome, text="axiom.py",
+            chrome, text="fiatrix.py",
             font=F_MONO_SM,
             text_color=COLOR_TEXT_DIM,
         ).pack(side="right")

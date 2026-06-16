@@ -1,10 +1,12 @@
 # =============================================================================
-# APP.PY — AXIOM Main Application Window
+# APP.PY — FIATRIX Main Application Window
 # =============================================================================
-# AXIOM — Linear Algebra Workspace
+# FIATRIX — Linear Algebra Workspace
 # Premium desktop application for linear algebra computation.
 # =============================================================================
 
+import os
+import tkinter as tk
 import customtkinter as ctk
 from config import (
     WINDOW_DEFAULT, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
@@ -19,6 +21,7 @@ from pages import (
     LUPage, EigenPage, DiagonalPage, SVDPage
 )
 from pages.dashboard_page import DashboardPage
+from components.toast import ToastManager
 
 
 # Set default appearance
@@ -42,7 +45,7 @@ PAGE_NAMES = {item["id"]: item["label"] for item in MENU_ITEMS}
 
 class ModernAlinApp(ctk.CTk):
     """
-    AXIOM — Linear Algebra Workspace
+    FIATRIX — Linear Algebra Workspace
     Main application window with premium dashboard and feature pages.
     """
 
@@ -53,6 +56,7 @@ class ModernAlinApp(ctk.CTk):
         self.title(f"{APP_NAME} — {APP_SUBTITLE}")
         self.geometry(WINDOW_DEFAULT)
         self.minsize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
+        self._setup_app_icon()
 
         # ─── State ───
         self.pages = {}
@@ -75,6 +79,40 @@ class ModernAlinApp(ctk.CTk):
         self._show_dashboard()
         self._setup_shortcuts()
         self._setup_responsive()
+        
+        # Toast global notification layer
+        self.toast_manager = ToastManager(self)
+
+    def show_toast(self, message=None, toast_type="error", title=None, description=None, duration=None):
+        if not hasattr(self, "toast_manager"):
+            return None
+
+        return self.toast_manager.show(
+            message=message,
+            toast_type=toast_type,
+            title=title,
+            description=description,
+            duration=duration,
+        )
+
+    def _setup_app_icon(self):
+        """Pasang logo aplikasi tanpa mengganggu startup jika asset belum tersedia."""
+        try:
+            icon_path = os.path.join("assets", "fiatrix-icon.ico")
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+                return
+        except Exception:
+            pass
+
+        try:
+            png_path = os.path.join("assets", "fiatrix-logo.png")
+            if os.path.exists(png_path):
+                icon = tk.PhotoImage(file=png_path)
+                self.iconphoto(True, icon)
+                self._app_icon_ref = icon
+        except Exception:
+            pass
 
     # ─────────────────────────────────────────────
     # BUILD
@@ -116,7 +154,7 @@ class ModernAlinApp(ctk.CTk):
             self.pages[page_id] = page
 
     def _build_dashboard(self):
-        """Build the premium AXIOM dashboard page."""
+        """Build the premium FIATRIX dashboard page."""
         self.dashboard = DashboardPage(
             self.content_container,
             on_navigate=self._dashboard_navigate,
@@ -138,7 +176,7 @@ class ModernAlinApp(ctk.CTk):
     # ─────────────────────────────────────────────
 
     def _show_dashboard(self):
-        """Show the AXIOM dashboard."""
+        """Show the FIATRIX dashboard."""
         self.dashboard.grid(row=0, column=0, sticky="nsew")
         self.status_bar.set_page("Dashboard")
 
@@ -202,6 +240,10 @@ class ModernAlinApp(ctk.CTk):
         # Escape: back to dashboard
         self.bind("<Escape>", self._shortcut_home)
 
+        # Ctrl+Enter: Calculate SPL on active page
+        self.bind_all("<Control-Return>", self._shortcut_calculate, add="+")
+        self.bind_all("<Control-KP_Enter>", self._shortcut_calculate, add="+")
+
     def _shortcut_nav(self, menu_id):
         """Navigate via keyboard shortcut."""
         self.sidebar.set_active(menu_id)
@@ -217,6 +259,21 @@ class ModernAlinApp(ctk.CTk):
             if hasattr(self.current_page, 'matrix_b'):
                 self.current_page.matrix_b._clear_all()
             self.status_bar.set_status("Input cleared", "info")
+
+    def _shortcut_calculate(self, event=None):
+        """Trigger calculation on the active page (SPL)."""
+        try:
+            if not self.current_page or not self.current_page.winfo_ismapped():
+                return None
+            
+            # Check if calc_button is enabled
+            if hasattr(self.current_page, 'calc_button') and hasattr(self.current_page, '_on_calculate'):
+                if str(self.current_page.calc_button.cget("state")) != "disabled":
+                    self.current_page._on_calculate()
+                    return "break"
+        except Exception:
+            pass
+        return None
 
     def _shortcut_copy(self, event=None):
         """Copy result from result console."""

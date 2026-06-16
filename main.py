@@ -1,7 +1,7 @@
 # =============================================================================
 # MAIN.PY — Entry Point
 # =============================================================================
-# AXIOM — Linear Algebra Workspace
+# FIATRIX — Linear Algebra Workspace
 # Premium desktop calculator for linear algebra computation.
 # =============================================================================
 
@@ -15,7 +15,7 @@ from app import ModernAlinApp
 
 
 def main():
-    """Launch AXIOM application."""
+    """Launch FIATRIX application."""
     app = ModernAlinApp()
     app.mainloop()
 

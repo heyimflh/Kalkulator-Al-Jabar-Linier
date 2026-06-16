@@ -62,6 +62,33 @@ class ErrorBanner(ctk.CTkFrame):
             banner_type: 'error', 'warning', 'success', 'info'
             auto_dismiss: ms sebelum auto-hide (0 = no auto-dismiss)
         """
+        try:
+            root = self.winfo_toplevel()
+            if hasattr(root, "show_toast"):
+                title_map = {
+                    "error": "Terjadi kesalahan",
+                    "warning": "Perlu perhatian",
+                    "success": "Berhasil",
+                    "info": "Informasi",
+                }
+
+                message_lower = str(message).lower()
+                if "singular" in message_lower or "invers" in message_lower or "balikan" in message_lower:
+                    title = "Matriks tidak dapat diinvers"
+                else:
+                    title = title_map.get(banner_type, "Notifikasi")
+
+                root.show_toast(
+                    toast_type=banner_type,
+                    title=title,
+                    description=message,
+                    duration=auto_dismiss if auto_dismiss else None,
+                )
+                self.hide()
+                return
+        except Exception:
+            pass
+
         # Cancel previous auto-dismiss
         if self._after_id:
             self.after_cancel(self._after_id)

@@ -1,7 +1,7 @@
 # =============================================================================
-# CONFIG.PY — AXIOM Theme, Font, and Layout Configuration
+# CONFIG.PY — FIATRIX Theme, Font, and Layout Configuration
 # =============================================================================
-# AXIOM — Linear Algebra Workspace
+# FIATRIX — Linear Algebra Workspace
 # Darkmatter Neon aesthetic: ultra-dark, violet primary, cyan secondary.
 # =============================================================================
 
@@ -193,7 +193,7 @@ COSMIC_RADIUS = 12   # soft rounded corners (radius 0.5rem ≈ 8–12px)
 # ─────────────────────────────────────────────
 # BRANDING
 # ─────────────────────────────────────────────
-APP_NAME = "AXIOM"
+APP_NAME = "FIATRIX"
 APP_SUBTITLE = "Linear Algebra Workspace"
 APP_VERSION = "v1.0"
 APP_DESCRIPTION = "Matrix computation, equation solving, eigen analysis, and SVD."

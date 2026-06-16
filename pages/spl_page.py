@@ -448,7 +448,10 @@ class SPLPage(ctk.CTkFrame):
 
         det = A.det()
         if det == 0:
-            return "Matriks A singular (det = 0), tidak bisa dihitung inversnya"
+            return (
+                "Matriks A singular (det = 0), sehingga metode Matriks Balikan "
+                "tidak bisa digunakan. Coba gunakan metode Gauss atau Gauss-Jordan."
+            )
 
         console.insert("Metode: x = A⁻¹ · b\n\n", "step")
         console.insert(f"det(A) = {det}\n\n", "info")

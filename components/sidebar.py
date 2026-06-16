@@ -1,10 +1,12 @@
 # =============================================================================
-# SIDEBAR.PY — AXIOM Premium Navigation Rail
+# SIDEBAR.PY — FIATRIX Premium Navigation Rail
 # =============================================================================
 # Darkmatter aesthetic sidebar with strong brand, premium active states,
 # and bottom utility card.
 # =============================================================================
 
+import os
+from PIL import Image
 import customtkinter as ctk
 from config import (
     FONT_NAV_ITEM, FONT_NAV_LABEL, FONT_SMALL,
@@ -15,7 +17,7 @@ from config import (
 
 class SidebarFrame(ctk.CTkFrame):
     """
-    AXIOM premium navigation rail.
+    FIATRIX premium navigation rail.
     - Strong brand area with diamond icon
     - Menu items with violet left-bar active indicator
     - Bottom utility card with status + theme toggle
@@ -39,6 +41,20 @@ class SidebarFrame(ctk.CTkFrame):
 
         self._build()
 
+    def _load_brand_logo(self, size=(28, 28)):
+        try:
+            logo_path = os.path.join("assets", "fiatrix-logo.png")
+            if os.path.exists(logo_path):
+                image = Image.open(logo_path).convert("RGBA")
+                return ctk.CTkImage(
+                    light_image=image,
+                    dark_image=image,
+                    size=size,
+                )
+        except Exception:
+            pass
+        return None
+
     def _build(self):
         """Construct sidebar."""
 
@@ -48,24 +64,36 @@ class SidebarFrame(ctk.CTkFrame):
         brand_area = ctk.CTkFrame(self, fg_color="transparent")
         brand_area.pack(fill="x", padx=20, pady=(28, 0))
 
-        # Logo row: diamond + AXIOM
+        # Logo row: diamond + FIATRIX
         logo_row = ctk.CTkFrame(brand_area, fg_color="transparent")
         logo_row.pack(anchor="w")
 
-        # Diamond icon with subtle glow bg
-        diamond_bg = ctk.CTkFrame(
-            logo_row,
-            fg_color=("gray92", "#14101F"),
-            corner_radius=10,
-            width=36, height=36,
-        )
-        diamond_bg.pack(side="left", padx=(0, 10))
-        diamond_bg.pack_propagate(False)
-        ctk.CTkLabel(
-            diamond_bg, text="◇",
-            font=("Segoe UI", 18),
-            text_color=("#7C3AED", "#A78BFA"),
-        ).place(relx=0.5, rely=0.5, anchor="center")
+        self._brand_logo = self._load_brand_logo((28, 28))
+
+        if self._brand_logo:
+            logo_label = ctk.CTkLabel(
+                logo_row,
+                text="",
+                image=self._brand_logo,
+                width=28,
+                height=28,
+            )
+            logo_label.pack(side="left", padx=(0, 6))
+        else:
+            # Diamond icon with subtle glow bg
+            diamond_bg = ctk.CTkFrame(
+                logo_row,
+                fg_color=("gray92", "#14101F"),
+                corner_radius=10,
+                width=36, height=36,
+            )
+            diamond_bg.pack(side="left", padx=(0, 10))
+            diamond_bg.pack_propagate(False)
+            ctk.CTkLabel(
+                diamond_bg, text="◇",
+                font=("Segoe UI", 18),
+                text_color=("#7C3AED", "#A78BFA"),
+            ).place(relx=0.5, rely=0.5, anchor="center")
 
         # Brand name
         ctk.CTkLabel(
